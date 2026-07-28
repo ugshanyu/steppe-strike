@@ -24,6 +24,7 @@ export class InputController {
     this.pitch = 0;
     this.aimPointer = null;
     this.aimLast = { x: 0, y: 0 };
+    this.mouseDrag = null;
     this.touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
       || innerWidth <= 760;
     this.bindKeyboard();
@@ -62,7 +63,11 @@ export class InputController {
 
   bindMouse() {
     this.canvas.addEventListener('click', () => {
-      if (!this.touch && document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock();
+      if (!this.touch && document.pointerLockElement !== this.canvas) {
+        try {
+          this.canvas.requestPointerLock?.()?.catch?.(() => {});
+        } catch { /* drag-to-look remains available */ }
+      }
     });
     addEventListener('mousemove', (event) => {
       if (document.pointerLockElement !== this.canvas) return;
@@ -74,6 +79,25 @@ export class InputController {
     addEventListener('mouseup', (event) => {
       if (event.button === 0) this.firing = false;
     });
+    this.canvas.addEventListener('pointerdown', (event) => {
+      if (this.touch || event.button !== 0 || document.pointerLockElement === this.canvas) return;
+      this.mouseDrag = event.pointerId;
+      this.aimLast = { x: event.clientX, y: event.clientY };
+      this.firing = true;
+      this.canvas.setPointerCapture(event.pointerId);
+    });
+    this.canvas.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== this.mouseDrag || document.pointerLockElement === this.canvas) return;
+      this.look(event.clientX - this.aimLast.x, event.clientY - this.aimLast.y, 0.004);
+      this.aimLast = { x: event.clientX, y: event.clientY };
+    });
+    const releaseDrag = (event) => {
+      if (event.pointerId !== this.mouseDrag) return;
+      this.mouseDrag = null;
+      this.firing = false;
+    };
+    this.canvas.addEventListener('pointerup', releaseDrag);
+    this.canvas.addEventListener('pointercancel', releaseDrag);
   }
 
   bindTouch() {
@@ -175,6 +199,10 @@ export class InputController {
   }
 
   capture() {
-    if (!this.touch) this.canvas.requestPointerLock?.();
+    if (!this.touch) {
+      try {
+        this.canvas.requestPointerLock?.()?.catch?.(() => {});
+      } catch { /* drag-to-look remains available */ }
+    }
   }
 }

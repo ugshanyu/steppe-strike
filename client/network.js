@@ -4,8 +4,9 @@ import {
 } from '../shared/protocol.js';
 
 export class RealtimeClient {
-  constructor(handlers = {}) {
+  constructor(handlers = {}, getAuthToken = () => '') {
     this.handlers = handlers;
+    this.getAuthToken = getAuthToken;
     this.socket = null;
     this.name = '';
     this.session = localStorage.getItem('steppe-session') || crypto.randomUUID();
@@ -27,6 +28,7 @@ export class RealtimeClient {
       this.reconnectAttempt = 0;
       socket.send(JSON.stringify({
         t: 'hello', version: 1, name: this.name, session: this.session,
+        authToken: this.getAuthToken(),
       }));
       this.handlers.status?.('connected');
       this.startPings();

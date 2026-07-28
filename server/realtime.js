@@ -3,7 +3,10 @@ import { MAX_PLAYERS, MSG, SNAPSHOT_RATE, TICK_RATE } from '../shared/constants.
 import {
   decodeInput, encodePong, encodeSnapshot, INPUT_BYTES,
 } from '../shared/protocol.js';
-import { ALLOWED_ORIGINS, IS_PRODUCTION } from './config.js';
+import {
+  ALLOWED_ORIGINS, IS_PRODUCTION, SERVICE_ID, USION_VERIFY_URL,
+} from './config.js';
+import { verifyIframeToken } from './usion-auth.js';
 
 const HELLO_TIMEOUT_MS = 5000;
 const MAX_BUFFERED_BYTES = 128 * 1024;
@@ -12,7 +15,7 @@ export function attachRealtime(server, world) {
   const wss = new WebSocketServer({
     noServer: true,
     perMessageDeflate: false,
-    maxPayload: 512,
+    maxPayload: 8192,
   });
 
   const sendJson = (ws, payload) => {
@@ -46,6 +49,7 @@ export function attachRealtime(server, world) {
   wss.on('connection', (ws) => {
     ws.isAlive = true;
     ws.player = null;
+    ws.authenticating = false;
     ws.messageWindow = { started: Date.now(), count: 0 };
     const helloTimer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
     ws.on('pong', () => { ws.isAlive = true; });
@@ -58,26 +62,40 @@ export function attachRealtime(server, world) {
         return;
       }
       if (!ws.player) {
-        if (isBinary) return;
+        if (isBinary || ws.authenticating) return;
         let message;
         try { message = JSON.parse(data.toString()); } catch { return; }
         if (!message || message.t !== 'hello' || message.version !== 1) return;
-        const result = world.join({ name: message.name, session: message.session, ws });
-        if (!result) {
-          sendJson(ws, { t: 'error', reason: 'World is full. Try again shortly.' });
-          ws.close(4001, 'world full');
-          return;
-        }
+        ws.authenticating = true;
         clearTimeout(helloTimer);
-        ws.player = result.player;
-        sendJson(ws, {
-          t: 'welcome', id: result.player.id, session: result.player.session,
-          tickRate: TICK_RATE, snapshotRate: SNAPSHOT_RATE, maxPlayers: MAX_PLAYERS,
-          players: world.roster(), scores: world.teamScores, reconnected: result.reconnected,
-        });
-        broadcast({
-          t: result.reconnected ? 'rejoin' : 'join',
-          id: result.player.id, name: result.player.name, team: result.player.team,
+        const identity = message.authToken
+          ? verifyIframeToken(message.authToken, {
+            serviceId: SERVICE_ID,
+            verifyUrl: USION_VERIFY_URL,
+          })
+          : Promise.resolve({ name: message.name, session: message.session });
+        identity.then(({ name, session }) => {
+          if (ws.readyState !== ws.OPEN) return;
+          const result = world.join({ name, session, ws });
+          if (!result) {
+            sendJson(ws, { t: 'error', reason: 'World is full. Try again shortly.' });
+            ws.close(4001, 'world full');
+            return;
+          }
+          clearTimeout(helloTimer);
+          ws.player = result.player;
+          sendJson(ws, {
+            t: 'welcome', id: result.player.id, session: result.player.session,
+            tickRate: TICK_RATE, snapshotRate: SNAPSHOT_RATE, maxPlayers: MAX_PLAYERS,
+            players: world.roster(), scores: world.teamScores, reconnected: result.reconnected,
+          });
+          broadcast({
+            t: result.reconnected ? 'rejoin' : 'join',
+            id: result.player.id, name: result.player.name, team: result.player.team,
+          });
+        }).catch(() => {
+          sendJson(ws, { t: 'error', reason: 'Usion identity could not be verified.' });
+          ws.close(4002, 'invalid identity');
         });
         return;
       }

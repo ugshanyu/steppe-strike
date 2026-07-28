@@ -9,7 +9,7 @@ import { WorldView } from './world-view.js';
 const sequenceAcked = (sequence, ack) => ((ack - sequence + 65536) % 65536) < 32768;
 
 export class SteppeStrike {
-  constructor(canvas) {
+  constructor(canvas, { getAuthToken = () => '' } = {}) {
     this.ui = new GameUI();
     this.audio = new GameAudio();
     this.view = new WorldView(canvas);
@@ -19,7 +19,7 @@ export class SteppeStrike {
       event: (event) => this.onEvent(event),
       snapshot: (snapshot) => this.onSnapshot(snapshot),
       latency: (latency) => this.ui.setLatency(latency),
-    });
+    }, getAuthToken);
     this.localId = 0;
     this.local = null;
     this.names = new Map();

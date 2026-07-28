@@ -20,7 +20,8 @@ function securityHeaders(response) {
   response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   response.setHeader('Content-Security-Policy',
     "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; "
-    + "style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'");
+    + "style-src 'self' 'unsafe-inline'; script-src 'self' https://usions.com; "
+    + "frame-ancestors 'self' https://usions.com; object-src 'none'; base-uri 'none'");
 }
 
 export function createRequestHandler(world, distDirectory) {

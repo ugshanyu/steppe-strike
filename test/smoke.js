@@ -1,16 +1,19 @@
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import WebSocket from 'ws';
 import { BUTTON, MSG } from '../shared/constants.js';
 import { decodeSnapshot, encodeInput } from '../shared/protocol.js';
 
 const PORT = 8127;
+const AUTH_PORT = 8128;
 const URL = `ws://127.0.0.1:${PORT}/ws`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class Bot {
-  constructor(name, session) {
+  constructor(name, session, authToken = '') {
     this.name = name;
     this.session = session;
+    this.authToken = authToken;
     this.id = 0;
     this.seq = 0;
     this.events = [];
@@ -37,6 +40,7 @@ class Bot {
         clearTimeout(timer);
         this.ws.send(JSON.stringify({
           t: 'hello', version: 1, name: this.name, session: this.session,
+          authToken: this.authToken,
         }));
         resolve();
       });
@@ -71,8 +75,29 @@ class Bot {
 }
 
 async function main() {
+  const authServer = http.createServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      let payload = {};
+      try { payload = JSON.parse(body); } catch { /* rejected below */ }
+      const valid = payload.token === 'valid-scoped-token'
+        && payload.expected_service_id === 'steppe-strike';
+      response.writeHead(valid ? 200 : 401, { 'Content-Type': 'application/json' });
+      response.end(valid
+        ? JSON.stringify({ user_id: 'usion-smoke-user', name: 'Саруул' })
+        : JSON.stringify({ detail: 'invalid iframe token' }));
+    });
+  });
+  await new Promise((resolve) => authServer.listen(AUTH_PORT, '127.0.0.1', resolve));
   const server = spawn(process.execPath, ['server/index.js'], {
-    env: { ...process.env, PORT: String(PORT), TEST_MODE: '1', NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      TEST_MODE: '1',
+      NODE_ENV: 'test',
+      USION_VERIFY_URL: `http://127.0.0.1:${AUTH_PORT}/iframe/verify-token`,
+    },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   try {
@@ -115,9 +140,17 @@ async function main() {
     if (reconnected.id !== originalId || !welcome.reconnected) throw new Error('session reconnect failed');
     reconnected.ws.close();
     bob.ws.close();
-    console.log('  ok  real two-client join, movement, kill, respawn, malformed input, reconnect');
+
+    const usionPlayer = new Bot('Spoofed name', 'spoofed-session', 'valid-scoped-token');
+    await usionPlayer.connect();
+    const usionWelcome = usionPlayer.events.find((event) => event.t === 'welcome');
+    const verifiedPlayer = usionWelcome.players.find((player) => player.id === usionPlayer.id);
+    if (verifiedPlayer?.name !== 'Саруул') throw new Error('Usion profile name was not enforced');
+    usionPlayer.ws.close();
+    console.log('  ok  two-client match, guest reconnect, verified Usion identity');
   } finally {
     server.kill('SIGTERM');
+    authServer.close();
     await sleep(150);
   }
 }

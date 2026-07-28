@@ -81,7 +81,7 @@ separate worlds.
 - The client sends inputs, never positions, damage, scores, or hit claims.
 - Names are normalized, control characters and markup are removed, and length
   is capped.
-- WebSocket frames are limited to 512 bytes and connections to 90 messages/s.
+- WebSocket frames are limited to 8 KB and connections to 90 messages/s.
 - The server caps players, checks browser origins when `ALLOWED_ORIGINS` is set,
   enforces fire rate/ammo/reload rules, and rejects friendly-fire claims by
   design.
@@ -92,8 +92,10 @@ separate worlds.
 - `/healthz` exposes safe runtime health, player count, tick, uptime, capacity,
   and Railway replica region.
 
-Guest names and reconnect IDs stay in browser local storage. There is no player
-database and no chat surface in this release.
+Guest names and reconnect IDs stay in browser local storage. Inside Usion, the
+host's short-lived, service-scoped token is verified by the game server and the
+player's Usion display name is used. There is no player database and no chat
+surface in this release.
 
 ## Local development
 
@@ -146,6 +148,8 @@ LIVE_URL=wss://steppe-strike-production.up.railway.app/ws npm run test:live
 | `NODE_ENV` | `development` | Enables production origin behavior |
 | `ALLOWED_ORIGINS` | empty | Comma-separated browser origins |
 | `TEST_MODE` | `0` | Deterministic close spawns for automated smoke tests |
+| `SERVICE_ID` | `steppe-strike` | Usion registry identity |
+| `USION_VERIFY_URL` | `https://mobile.mongolai.mn/iframe/verify-token` | Scoped iframe-token verification endpoint |
 
 ## Railway
 
