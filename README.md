@@ -131,6 +131,13 @@ This runs:
   death, respawn, malformed input resilience, and same-session reconnect
 - the production Vite build
 
+To verify an already-deployed server with two independent secure-WebSocket
+clients:
+
+```bash
+LIVE_URL=wss://steppe-strike-production.up.railway.app/ws npm run test:live
+```
+
 ## Configuration
 
 | Variable | Default | Purpose |

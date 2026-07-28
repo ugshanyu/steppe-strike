@@ -9,6 +9,7 @@
     "start": "node server/index.js",
     "build": "vite build",
     "test": "node --test test/*.test.js && node test/smoke.js",
+    "test:live": "node test/live-smoke.js",
     "check": "npm test && npm run build"
   },
   "engines": {
