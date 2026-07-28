@@ -42,4 +42,3 @@ test('malformed snapshot length is rejected', () => {
   bytes.set(new Uint8Array(valid));
   assert.equal(decodeSnapshot(new DataView(bytes.buffer)), null);
 });
-

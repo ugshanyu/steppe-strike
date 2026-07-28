@@ -35,4 +35,3 @@ export class GameAudio {
     this.tone(150, 0.35, 0.1, 'sawtooth', 0.25);
   }
 }
-

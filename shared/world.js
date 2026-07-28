@@ -94,4 +94,3 @@ export function terrainRayDistance(origin, direction, maxDistance) {
   }
   return nearest;
 }
-

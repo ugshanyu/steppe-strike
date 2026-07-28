@@ -80,4 +80,3 @@ export class RealtimeClient {
     this.pingTimer = null;
   }
 }
-

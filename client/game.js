@@ -169,4 +169,3 @@ export class SteppeStrike {
     requestAnimationFrame((next) => this.frame(next));
   }
 }
-

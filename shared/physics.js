@@ -39,4 +39,3 @@ export function stepMovement(state, input, dt) {
     state.vy = 0;
   }
 }
-

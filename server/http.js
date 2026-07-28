@@ -65,4 +65,3 @@ export function createRequestHandler(world, distDirectory) {
     else createReadStream(file).pipe(response);
   };
 }
-

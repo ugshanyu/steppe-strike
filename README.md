@@ -146,4 +146,3 @@ The repository contains `railway.json` with the production build, start
 command, `/healthz` check, and restart policy. The production service is kept in
 Railway's Singapore region (`asia-southeast1-eqsg3a`), the closest available
 Railway deployment region to the primary Mongolian audience.
-

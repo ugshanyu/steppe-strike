@@ -30,4 +30,3 @@ test('friendly fire and spawn-shield damage are rejected', () => {
   const shot = resolveShot(shooter, [shooter, teammate, shieldedEnemy], Date.now());
   assert.equal(shot.victim, null);
 });
-

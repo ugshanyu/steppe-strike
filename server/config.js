@@ -5,4 +5,3 @@ export const TEST_MODE = process.env.TEST_MODE === '1';
 export const ALLOWED_ORIGINS = new Set(
   (process.env.ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
 );
-

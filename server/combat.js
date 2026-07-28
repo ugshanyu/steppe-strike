@@ -65,4 +65,3 @@ export function resolveShot(shooter, players, now) {
     damage: headshot ? HEAD_DAMAGE : BODY_DAMAGE,
   };
 }
-

@@ -200,4 +200,3 @@ export class GameWorld {
       ({ id, name, team, kills, deaths }));
   }
 }
-

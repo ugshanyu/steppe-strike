@@ -41,4 +41,3 @@ export const MSG = {
   SNAPSHOT: 16,
   PONG: 17,
 };
-
