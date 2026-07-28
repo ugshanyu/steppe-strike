@@ -6,7 +6,7 @@ Steppe Strike drops every player into the same public block-world team battle.
 There are no accounts, room codes, downloads, or map menus: choose a name and
 join. The launch server supports up to **96 simultaneous players** in one world.
 
-> Production URL will be added after the first Railway deployment.
+**Play:** [steppe-strike-production.up.railway.app](https://steppe-strike-production.up.railway.app)
 
 ## What is playable
 
