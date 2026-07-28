@@ -56,6 +56,15 @@ class LiveBot {
     this.socket.send(encodeInput(this.sequence, buttons, yaw, pitch));
   }
 
+  async hold(buttons, yaw, pitch, duration) {
+    const until = Date.now() + duration;
+    while (Date.now() < until) {
+      this.send(buttons, yaw, pitch);
+      await sleep(34);
+    }
+    this.send(0, yaw, pitch);
+  }
+
   async waitFor(predicate, label, timeout = 7000) {
     const started = Date.now();
     while (!predicate()) {
@@ -84,12 +93,42 @@ try {
     const state = alpha.state();
     return state && Math.hypot(state.x - start.x, state.z - start.z) > .35;
   }, 'authoritative movement');
+  await alpha.hold(BUTTON.FORWARD, before.yaw, 0, 1900);
+  const editStart = alpha.events.length;
+  await alpha.hold(BUTTON.MINE, before.yaw, -1.25, 650);
+  await alpha.waitFor(
+    () => alpha.events.slice(editStart).some((event) => (
+      event.t === 'block' && event.id === 0 && event.actorId === alpha.id
+    )),
+    'authoritative mining',
+  );
+  const mined = alpha.events.slice(editStart).find((event) => (
+    event.t === 'block' && event.id === 0 && event.actorId === alpha.id
+  ));
+  await bravo.waitFor(
+    () => bravo.events.some((event) => event.t === 'block' && event.revision === mined.revision),
+    'shared mined block',
+  );
+  await alpha.hold(BUTTON.PLACE, before.yaw, -1.25, 120);
+  await alpha.waitFor(
+    () => alpha.events.some((event) => (
+      event.t === 'block' && event.actorId === alpha.id && event.revision > mined.revision
+    )),
+    'authoritative placement',
+  );
+  const placed = alpha.events.find((event) => (
+    event.t === 'block' && event.actorId === alpha.id && event.revision > mined.revision
+  ));
+  await bravo.waitFor(
+    () => bravo.events.some((event) => event.t === 'block' && event.revision === placed.revision),
+    'shared placed block',
+  );
   alpha.socket.send(Buffer.from([1, 2]));
   await sleep(150);
   if (alpha.socket.readyState !== WebSocket.OPEN || bravo.socket.readyState !== WebSocket.OPEN) {
     throw new Error('malformed input disconnected a healthy client');
   }
-  console.log(`  ok  production WSS shared world (${alpha.id}, ${bravo.id}) and authoritative movement`);
+  console.log(`  ok  production WSS shared world (${alpha.id}, ${bravo.id}), movement, mine, and place`);
 } finally {
   alpha.socket?.close();
   bravo.socket?.close();

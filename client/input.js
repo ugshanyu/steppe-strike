@@ -1,6 +1,6 @@
 import { BUTTON } from '../shared/constants.js';
 
-const keyMap = {
+const KEY_BITS = {
   KeyW: BUTTON.FORWARD,
   ArrowUp: BUTTON.FORWARD,
   KeyS: BUTTON.BACK,
@@ -10,21 +10,20 @@ const keyMap = {
   KeyD: BUTTON.RIGHT,
   ArrowRight: BUTTON.RIGHT,
   Space: BUTTON.JUMP,
-  KeyR: BUTTON.RELOAD,
 };
 
 export class InputController {
-  constructor(canvas, onScoreboard) {
+  constructor(canvas, onSlotChange = () => {}) {
     this.canvas = canvas;
-    this.onScoreboard = onScoreboard;
+    this.onSlotChange = onSlotChange;
     this.keys = 0;
     this.touchMove = 0;
-    this.firing = false;
+    this.actions = 0;
     this.yaw = 0;
     this.pitch = 0;
-    this.aimPointer = null;
-    this.aimLast = { x: 0, y: 0 };
-    this.mouseDrag = null;
+    this.slot = 0;
+    this.lookPointer = null;
+    this.lookLast = { x: 0, y: 0 };
     this.touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
       || innerWidth <= 760;
     this.bindKeyboard();
@@ -34,148 +33,142 @@ export class InputController {
 
   bindKeyboard() {
     addEventListener('keydown', (event) => {
-      if (event.code === 'Tab') {
-        event.preventDefault();
-        this.onScoreboard(true);
+      if (/^Digit[1-6]$/.test(event.code)) {
+        this.selectSlot(Number(event.code.slice(-1)) - 1);
         return;
       }
-      const bit = keyMap[event.code];
+      const bit = KEY_BITS[event.code];
       if (bit) {
         event.preventDefault();
         this.keys |= bit;
       }
     });
     addEventListener('keyup', (event) => {
-      if (event.code === 'Tab') {
-        event.preventDefault();
-        this.onScoreboard(false);
-        return;
-      }
-      const bit = keyMap[event.code];
+      const bit = KEY_BITS[event.code];
       if (bit) this.keys &= ~bit;
     });
     addEventListener('blur', () => {
       this.keys = 0;
-      this.firing = false;
-      this.onScoreboard(false);
+      this.actions = 0;
     });
+  }
+
+  requestPointerLock() {
+    if (this.touch || document.pointerLockElement === this.canvas) return;
+    try {
+      this.canvas.requestPointerLock?.()?.catch?.(() => {});
+    } catch { /* drag-to-look remains available */ }
   }
 
   bindMouse() {
-    this.canvas.addEventListener('click', () => {
-      if (!this.touch && document.pointerLockElement !== this.canvas) {
-        try {
-          this.canvas.requestPointerLock?.()?.catch?.(() => {});
-        } catch { /* drag-to-look remains available */ }
-      }
-    });
+    this.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+    this.canvas.addEventListener('click', () => this.requestPointerLock());
     addEventListener('mousemove', (event) => {
-      if (document.pointerLockElement !== this.canvas) return;
-      this.look(event.movementX, event.movementY, 0.0022);
-    });
-    addEventListener('mousedown', (event) => {
-      if (event.button === 0 && document.pointerLockElement === this.canvas) this.firing = true;
-    });
-    addEventListener('mouseup', (event) => {
-      if (event.button === 0) this.firing = false;
+      if (document.pointerLockElement === this.canvas) this.look(event.movementX, event.movementY, 0.0022);
     });
     this.canvas.addEventListener('pointerdown', (event) => {
-      if (this.touch || event.button !== 0 || document.pointerLockElement === this.canvas) return;
-      this.mouseDrag = event.pointerId;
-      this.aimLast = { x: event.clientX, y: event.clientY };
-      this.firing = true;
-      this.canvas.setPointerCapture(event.pointerId);
+      if (this.touch) return;
+      if (event.button === 0) this.actions |= BUTTON.MINE;
+      if (event.button === 2) this.actions |= BUTTON.PLACE;
+      if (document.pointerLockElement !== this.canvas && event.button === 0) {
+        this.lookPointer = event.pointerId;
+        this.lookLast = { x: event.clientX, y: event.clientY };
+        this.canvas.setPointerCapture(event.pointerId);
+      }
     });
     this.canvas.addEventListener('pointermove', (event) => {
-      if (event.pointerId !== this.mouseDrag || document.pointerLockElement === this.canvas) return;
-      this.look(event.clientX - this.aimLast.x, event.clientY - this.aimLast.y, 0.004);
-      this.aimLast = { x: event.clientX, y: event.clientY };
+      if (event.pointerId !== this.lookPointer || document.pointerLockElement === this.canvas) return;
+      this.look(event.clientX - this.lookLast.x, event.clientY - this.lookLast.y, 0.004);
+      this.lookLast = { x: event.clientX, y: event.clientY };
     });
-    const releaseDrag = (event) => {
-      if (event.pointerId !== this.mouseDrag) return;
-      this.mouseDrag = null;
-      this.firing = false;
+    const release = (event) => {
+      if (event.button === 0) this.actions &= ~BUTTON.MINE;
+      if (event.button === 2) this.actions &= ~BUTTON.PLACE;
+      if (event.pointerId === this.lookPointer) this.lookPointer = null;
     };
-    this.canvas.addEventListener('pointerup', releaseDrag);
-    this.canvas.addEventListener('pointercancel', releaseDrag);
+    this.canvas.addEventListener('pointerup', release);
+    this.canvas.addEventListener('pointercancel', release);
+    addEventListener('wheel', (event) => {
+      this.selectSlot((this.slot + Math.sign(event.deltaY) + 6) % 6);
+    }, { passive: true });
   }
 
   bindTouch() {
-    const joystick = document.querySelector('#joystick');
-    const knob = document.querySelector('#joystick-knob');
-    const fire = document.querySelector('#fire-button');
-    const jump = document.querySelector('#jump-button');
-    const reload = document.querySelector('#reload-button');
-    let movePointer = null;
-
-    const updateStick = (event) => {
-      const box = joystick.getBoundingClientRect();
-      const dx = event.clientX - (box.left + box.width / 2);
-      const dy = event.clientY - (box.top + box.height / 2);
-      const distance = Math.hypot(dx, dy);
-      const scale = Math.min(1, 42 / (distance || 1));
-      const x = dx * scale;
-      const y = dy * scale;
-      knob.style.transform = `translate(${x}px, ${y}px)`;
-      this.touchMove = 0;
-      if (y < -12) this.touchMove |= BUTTON.FORWARD;
-      if (y > 12) this.touchMove |= BUTTON.BACK;
-      if (x < -12) this.touchMove |= BUTTON.LEFT;
-      if (x > 12) this.touchMove |= BUTTON.RIGHT;
-    };
-    joystick.addEventListener('pointerdown', (event) => {
-      movePointer = event.pointerId;
-      joystick.setPointerCapture(movePointer);
-      updateStick(event);
-    });
-    joystick.addEventListener('pointermove', (event) => {
-      if (event.pointerId === movePointer) updateStick(event);
-    });
-    const releaseStick = (event) => {
-      if (event.pointerId !== movePointer) return;
-      movePointer = null;
-      this.touchMove = 0;
-      knob.style.transform = '';
-    };
-    joystick.addEventListener('pointerup', releaseStick);
-    joystick.addEventListener('pointercancel', releaseStick);
-
+    this.bindJoystick();
+    this.bindHold(document.querySelector('#mine-button'), BUTTON.MINE);
+    this.bindHold(document.querySelector('#place-button'), BUTTON.PLACE);
+    this.bindHold(document.querySelector('#jump-button'), BUTTON.JUMP);
     this.canvas.addEventListener('pointerdown', (event) => {
-      if (!this.touch || event.clientX < innerWidth * 0.35 || this.aimPointer !== null) return;
-      this.aimPointer = event.pointerId;
-      this.aimLast = { x: event.clientX, y: event.clientY };
+      if (!this.touch || event.clientX < innerWidth * 0.34 || this.lookPointer !== null) return;
+      this.lookPointer = event.pointerId;
+      this.lookLast = { x: event.clientX, y: event.clientY };
       this.canvas.setPointerCapture(event.pointerId);
     });
     this.canvas.addEventListener('pointermove', (event) => {
-      if (event.pointerId !== this.aimPointer) return;
-      this.look(event.clientX - this.aimLast.x, event.clientY - this.aimLast.y, 0.005);
-      this.aimLast = { x: event.clientX, y: event.clientY };
+      if (event.pointerId !== this.lookPointer) return;
+      this.look(event.clientX - this.lookLast.x, event.clientY - this.lookLast.y, 0.005);
+      this.lookLast = { x: event.clientX, y: event.clientY };
     });
-    const releaseAim = (event) => {
-      if (event.pointerId === this.aimPointer) this.aimPointer = null;
+    const stopLook = (event) => {
+      if (event.pointerId === this.lookPointer) this.lookPointer = null;
     };
-    this.canvas.addEventListener('pointerup', releaseAim);
-    this.canvas.addEventListener('pointercancel', releaseAim);
+    this.canvas.addEventListener('pointerup', stopLook);
+    this.canvas.addEventListener('pointercancel', stopLook);
+  }
 
-    const hold = (element, bit, activeClass = '') => {
-      element.addEventListener('pointerdown', (event) => {
-        event.preventDefault();
-        if (bit === BUTTON.FIRE) this.firing = true;
-        else this.keys |= bit;
-        if (activeClass) element.classList.add(activeClass);
-        element.setPointerCapture(event.pointerId);
-      });
-      const stop = () => {
-        if (bit === BUTTON.FIRE) this.firing = false;
-        else this.keys &= ~bit;
-        if (activeClass) element.classList.remove(activeClass);
-      };
-      element.addEventListener('pointerup', stop);
-      element.addEventListener('pointercancel', stop);
+  bindJoystick() {
+    const joystick = document.querySelector('#joystick');
+    const knob = document.querySelector('#joystick-knob');
+    let pointer = null;
+    const update = (event) => {
+      const box = joystick.getBoundingClientRect();
+      const dx = event.clientX - box.left - box.width / 2;
+      const dy = event.clientY - box.top - box.height / 2;
+      const scale = Math.min(1, 42 / (Math.hypot(dx, dy) || 1));
+      const x = dx * scale;
+      const y = dy * scale;
+      knob.style.transform = `translate(${x}px, ${y}px)`;
+      this.touchMove = (y < -12 ? BUTTON.FORWARD : 0) | (y > 12 ? BUTTON.BACK : 0)
+        | (x < -12 ? BUTTON.LEFT : 0) | (x > 12 ? BUTTON.RIGHT : 0);
     };
-    hold(fire, BUTTON.FIRE, 'active');
-    hold(jump, BUTTON.JUMP);
-    hold(reload, BUTTON.RELOAD);
+    joystick.addEventListener('pointerdown', (event) => {
+      pointer = event.pointerId;
+      joystick.setPointerCapture(pointer);
+      update(event);
+    });
+    joystick.addEventListener('pointermove', (event) => {
+      if (event.pointerId === pointer) update(event);
+    });
+    const stop = (event) => {
+      if (event.pointerId !== pointer) return;
+      pointer = null;
+      this.touchMove = 0;
+      knob.style.transform = '';
+    };
+    joystick.addEventListener('pointerup', stop);
+    joystick.addEventListener('pointercancel', stop);
+  }
+
+  bindHold(element, bit) {
+    element.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      if (bit === BUTTON.JUMP) this.keys |= bit;
+      else this.actions |= bit;
+      element.classList.add('active');
+      element.setPointerCapture(event.pointerId);
+    });
+    const stop = () => {
+      if (bit === BUTTON.JUMP) this.keys &= ~bit;
+      else this.actions &= ~bit;
+      element.classList.remove('active');
+    };
+    element.addEventListener('pointerup', stop);
+    element.addEventListener('pointercancel', stop);
+  }
+
+  selectSlot(slot) {
+    this.slot = Math.max(0, Math.min(5, slot));
+    this.onSlotChange(this.slot);
   }
 
   look(dx, dy, sensitivity) {
@@ -187,9 +180,10 @@ export class InputController {
 
   read() {
     return {
-      buttons: this.keys | this.touchMove | (this.firing ? BUTTON.FIRE : 0),
+      buttons: this.keys | this.touchMove | this.actions,
       yaw: this.yaw,
       pitch: this.pitch,
+      slot: this.slot,
     };
   }
 
@@ -199,10 +193,6 @@ export class InputController {
   }
 
   capture() {
-    if (!this.touch) {
-      try {
-        this.canvas.requestPointerLock?.()?.catch?.(() => {});
-      } catch { /* drag-to-look remains available */ }
-    }
+    this.requestPointerLock();
   }
 }

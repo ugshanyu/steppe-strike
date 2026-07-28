@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A global realtime voxel FPS built for fast play from Mongolia.",
+  "description": "One persistent multiplayer block world for Mongolia.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "start": "node server/index.js",

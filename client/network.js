@@ -66,7 +66,7 @@ export class RealtimeClient {
 
   sendInput(seq, input) {
     if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(encodeInput(seq, input.buttons, input.yaw, input.pitch));
+      this.socket.send(encodeInput(seq, input.buttons, input.yaw, input.pitch, input.slot));
     }
   }
 

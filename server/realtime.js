@@ -32,6 +32,7 @@ export function attachRealtime(server, world) {
     }
   };
   world.emit = broadcast;
+  world.send = (player, payload) => sendJson(player.ws, payload);
 
   server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
@@ -87,12 +88,13 @@ export function attachRealtime(server, world) {
           sendJson(ws, {
             t: 'welcome', id: result.player.id, session: result.player.session,
             tickRate: TICK_RATE, snapshotRate: SNAPSHOT_RATE, maxPlayers: MAX_PLAYERS,
-            players: world.roster(), scores: world.teamScores, reconnected: result.reconnected,
+            players: world.roster(), world: world.worldInfo(), reconnected: result.reconnected,
           });
           broadcast({
             t: result.reconnected ? 'rejoin' : 'join',
-            id: result.player.id, name: result.player.name, team: result.player.team,
+            id: result.player.id, name: result.player.name,
           });
+          world.syncInterest(result.player);
         }).catch(() => {
           sendJson(ws, { t: 'error', reason: 'Usion identity could not be verified.' });
           ws.close(4002, 'invalid identity');
@@ -124,7 +126,11 @@ export function attachRealtime(server, world) {
     for (const recipient of players) {
       if (recipient.ws.readyState !== recipient.ws.OPEN
         || recipient.ws.bufferedAmount >= MAX_BUFFERED_BYTES) continue;
-      recipient.ws.send(encodeSnapshot(world.tickNumber, recipient.lastAck, players));
+      recipient.ws.send(encodeSnapshot(
+        world.tickNumber,
+        recipient.lastAck,
+        world.visiblePlayers(recipient),
+      ));
     }
   }, 1000 / TICK_RATE);
 

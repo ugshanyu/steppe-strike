@@ -2,14 +2,17 @@ import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DT } from '../shared/constants.js';
-import { PORT, TEST_MODE } from './config.js';
+import { PORT, TEST_MODE, WORLD_DATA_PATH } from './config.js';
 import { GameWorld } from './game-world.js';
 import { createRequestHandler } from './http.js';
 import { attachRealtime } from './realtime.js';
+import { createWorldStore, loadWorldState } from './world-store.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const world = new GameWorld({ testMode: TEST_MODE });
-const server = http.createServer(createRequestHandler(world, join(root, 'dist')));
+const world = new GameWorld({ testMode: TEST_MODE, persisted: loadWorldState(WORLD_DATA_PATH) });
+const store = createWorldStore(WORLD_DATA_PATH, () => world.serialize());
+world.onDirty = () => store.markDirty();
+const server = http.createServer(createRequestHandler(world, join(root, 'dist'), store));
 const realtime = attachRealtime(server, world);
 const gameTimer = setInterval(() => world.step(), DT * 1000);
 
@@ -24,10 +27,11 @@ server.listen(PORT, '0.0.0.0', () => {
   }));
 });
 
-function shutdown(signal) {
+async function shutdown(signal) {
   console.log(JSON.stringify({ level: 'info', event: 'shutdown', signal }));
   clearInterval(gameTimer);
   realtime.close();
+  await store.flush();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();
 }

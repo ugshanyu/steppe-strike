@@ -1,4 +1,4 @@
-import { SteppeStrike } from './game.js';
+import { SteppeWorld } from './game.js';
 import { initializePlatform } from './platform.js';
 
 const canvas = document.querySelector('#game-canvas');
@@ -12,7 +12,7 @@ nameInput.value = remembered || `Нүүдэлчин ${Math.floor(100 + Math.rand
 async function boot() {
   try {
     const platform = await initializePlatform();
-    const game = new SteppeStrike(canvas, { getAuthToken: platform.getToken });
+    const game = new SteppeWorld(canvas, { getAuthToken: platform.getToken });
     if (platform.name) {
       nameInput.value = platform.name;
       nameInput.readOnly = true;

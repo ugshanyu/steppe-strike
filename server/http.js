@@ -24,7 +24,7 @@ function securityHeaders(response) {
     + "frame-ancestors 'self' https://usions.com; object-src 'none'; base-uri 'none'");
 }
 
-export function createRequestHandler(world, distDirectory) {
+export function createRequestHandler(world, distDirectory, store = null) {
   return async (request, response) => {
     securityHeaders(response);
     const url = new URL(request.url, 'http://localhost');
@@ -37,6 +37,9 @@ export function createRequestHandler(world, distDirectory) {
         players: world.connectedPlayers().length,
         capacity: 96,
         tick: world.tickNumber,
+        revision: world.revision,
+        edits: world.voxels.edits.size,
+        persistence: store?.health() || null,
         region: process.env.RAILWAY_REPLICA_REGION || 'local',
         uptime: Math.round(process.uptime()),
       }));
