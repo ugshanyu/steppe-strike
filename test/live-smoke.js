@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { BUTTON, MSG } from '../shared/constants.js';
+import { BUTTON, MSG, PLAYER_FLAG } from '../shared/constants.js';
 import { decodeSnapshot, encodeInput } from '../shared/protocol.js';
 
 const SOCKET_URL = process.env.LIVE_URL;
@@ -69,6 +69,20 @@ class LiveBot {
     ));
   }
 
+  fireAt(target) {
+    const shooter = this.state();
+    const victim = this.state(target.id);
+    const dx = victim.x - shooter.x;
+    const dz = victim.z - shooter.z;
+    const horizontal = Math.hypot(dx, dz);
+    const yaw = Math.atan2(-dx, -dz);
+    const pitch = Math.atan2(
+      (victim.y + 1.62) - (shooter.y + 1.62),
+      horizontal,
+    );
+    this.send(BUTTON.FIRE, yaw, pitch, true);
+  }
+
   async waitFor(predicate, label, timeout = 8_000) {
     const started = Date.now();
     while (!predicate()) {
@@ -76,6 +90,30 @@ class LiveBot {
       await sleep(25);
     }
   }
+}
+
+async function eliminate(attacker, victim) {
+  const previousKills = attacker.events.filter(
+    (event) => event.t === 'kill' && event.victim === victim.id,
+  ).length;
+  for (let shot = 0; shot < 4; shot += 1) {
+    attacker.fireAt(victim);
+    await attacker.waitFor(
+      () => attacker.events.some(
+        (event) => event.t === 'shot' && event.nonce === attacker.fireNonce,
+      ),
+      'shot resolution',
+    );
+    if (attacker.events.filter(
+      (event) => event.t === 'kill' && event.victim === victim.id,
+    ).length > previousKills) return;
+    await sleep(120);
+  }
+  throw new Error(`${attacker.name}: could not eliminate ${victim.name} ${JSON.stringify({
+    attacker: attacker.state(),
+    victim: attacker.state(victim.id),
+    shots: attacker.events.filter((event) => event.t === 'shot').slice(-4),
+  })}`);
 }
 
 const alpha = new LiveBot('Live Alpha', TOKENS[0]);
@@ -96,14 +134,28 @@ try {
     const state = alpha.state();
     return state && Math.hypot(state.x - before.x, state.z - before.z) > 0.25;
   }, 'authoritative movement');
-  const ammo = alpha.state().ammo;
-  alpha.send(BUTTON.FIRE, alpha.state().yaw, alpha.state().pitch, true);
+
+  for (let round = 0; round < 7; round += 1) {
+    await alpha.waitFor(
+      () => alpha.state()?.health === 100
+        && bravo.state()?.health === 100
+        && (bravo.state().flags & PLAYER_FLAG.ALIVE),
+      `round ${round + 1} spawn`,
+      10_000,
+    );
+    await eliminate(alpha, bravo);
+    await alpha.waitFor(
+      () => bravo.state()?.health === 0
+        && (bravo.state().flags & PLAYER_FLAG.SPECTATOR),
+      `round ${round + 1} authoritative death`,
+    );
+  }
   await alpha.waitFor(
-    () => alpha.events.some((event) => event.t === 'shot' && event.shooter === alpha.id),
-    'authoritative rifle event',
+    () => alpha.events.some((event) => event.t === 'match' && event.phase === 'match_end'),
+    'match end',
   );
-  await alpha.waitFor(() => alpha.state().ammo === ammo - 1, 'authoritative ammo');
-  console.log(`  ok  production direct room ${ROOM_ID}, movement and rifle authority`);
+  await sleep(2_000);
+  console.log(`  ok  production direct room ${ROOM_ID}, seven-round authoritative match`);
 } finally {
   alpha.socket?.close();
   bravo.socket?.close();

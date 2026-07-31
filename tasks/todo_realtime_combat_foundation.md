@@ -46,6 +46,6 @@
 - [x] Test with 150 ms latency, 60 ms jitter, and 5% loss simulation.
 - [x] Load-test concurrent ten-player rooms and record server tick p95/p99.
 - [x] Play-test desktop and touch controls in a real browser.
-- [ ] Deploy one stateful Singapore replica and verify authenticated production access.
+- [x] Deploy one stateful Singapore replica and verify authenticated production access.
 - [ ] Keep Usion unpublished until all quality gates pass.
 - [ ] Delete this completed task file.
