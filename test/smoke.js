@@ -229,7 +229,7 @@ async function main() {
     await rejoined.close();
 
     await flood.connect();
-    for (let index = 0; index < 100; index += 1) {
+    for (let index = 0; index < 190; index += 1) {
       flood.send(0, 0);
     }
     await flood.waitFor(
