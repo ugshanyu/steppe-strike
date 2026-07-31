@@ -18,6 +18,7 @@
 
 - [x] Replace the singleton player simulation with isolated `roomId -> Match` state.
 - [x] Support 2–10 human seats with short reconnect reservations.
+- [x] Retire abandoned rooms after reconnect grace so Usion can safely reuse room IDs.
 - [x] Run server simulation at a fixed 60 Hz with drift and overrun telemetry.
 - [x] Send compact binary inputs at 60 Hz and snapshots at 20–30 Hz.
 - [x] Predict local movement, reconcile acknowledged input, and interpolate remote players.

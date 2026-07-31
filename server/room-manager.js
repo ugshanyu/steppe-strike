@@ -32,7 +32,15 @@ export class RoomManager {
   }
 
   step(now = Date.now()) {
-    for (const room of this.rooms.values()) room.step(now);
+    for (const [roomId, room] of this.rooms) {
+      room.step(now);
+      const seats = [...room.match.seats.values()];
+      if (seats.length > 0
+        && room.match.connectedSeats().length === 0
+        && seats.every((seat) => seat.expired)) {
+        this.rooms.delete(roomId);
+      }
+    }
   }
 
   async handleResult(room, result) {

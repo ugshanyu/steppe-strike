@@ -43,7 +43,6 @@ export class RealtimeClient {
     socket.addEventListener('open', () => {
       if (generation !== this.generation) return socket.close();
       clearTimeout(timeout);
-      this.reconnectAttempt = 0;
       socket.send(JSON.stringify({ t: 'hello', version: 2, name: this.name }));
       this.startPings();
     });
@@ -71,7 +70,10 @@ export class RealtimeClient {
     if (typeof data === 'string') {
       let message;
       try { message = JSON.parse(data); } catch { return; }
-      if (message.t === 'welcome') this.handlers.status?.('connected');
+      if (message.t === 'welcome') {
+        this.reconnectAttempt = 0;
+        this.handlers.status?.('connected');
+      }
       this.handlers.event?.(message);
       return;
     }

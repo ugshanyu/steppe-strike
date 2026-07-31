@@ -39,6 +39,21 @@ test('manager isolates the same player identity into separate Usion rooms', () =
   assert.equal(second.room.match.seats.size, 1);
 });
 
+test('manager retires an abandoned room after reconnect grace so Usion can reuse its id', () => {
+  const rooms = new RoomManager();
+  const original = rooms.join(identity('alpha'), 'Alpha', socket(), 0).room;
+  original.disconnect(original.match.seats.get('alpha'), 10);
+
+  rooms.step(15_010);
+  assert.equal(rooms.rooms.get('room-1'), original);
+  rooms.step(15_011);
+  assert.equal(rooms.rooms.has('room-1'), false);
+
+  const replacement = rooms.join(identity('alpha'), 'Alpha', socket(), 15_012);
+  assert.ok(replacement);
+  assert.notEqual(replacement.room, original);
+});
+
 test('room enforces ten seats and retains a reconnect seat', () => {
   const room = new MatchRoom('room-1', { now: 0 });
   for (let index = 0; index < 10; index += 1) {
