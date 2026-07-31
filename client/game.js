@@ -1,34 +1,45 @@
-import { DT } from '../shared/constants.js';
+import { CombatMap } from '../shared/combat-map.js';
+import { DT, PLAYER_FLAG } from '../shared/constants.js';
 import { stepMovement } from '../shared/physics.js';
-import { GameAudio } from './audio.js';
 import { InputController } from './input.js';
 import { RealtimeClient } from './network.js';
 import { GameUI } from './ui.js';
 import { WorldView } from './world-view.js';
 
-const sequenceAcked = (sequence, ack) => ((ack - sequence + 65536) % 65536) < 32768;
+const sequenceAcked = (sequence, ack) => ((ack - sequence + 65_536) % 65_536) < 32_768;
+const angleLerp = (a, b, amount) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * amount;
+const mixPlayer = (a, b, amount) => ({
+  ...b,
+  x: a.x + (b.x - a.x) * amount,
+  y: a.y + (b.y - a.y) * amount,
+  z: a.z + (b.z - a.z) * amount,
+  yaw: angleLerp(a.yaw, b.yaw, amount),
+  pitch: a.pitch + (b.pitch - a.pitch) * amount,
+});
 
 export class SteppeStrike {
-  constructor(canvas) {
+  constructor(canvas, { resolveUrl }) {
     this.ui = new GameUI();
-    this.audio = new GameAudio();
     this.view = new WorldView(canvas);
-    this.input = new InputController(canvas, (show) => this.ui.showScoreboard(show));
-    this.net = new RealtimeClient({
+    this.input = new InputController(canvas);
+    this.net = new RealtimeClient(resolveUrl, {
       status: (status) => this.ui.setStatus(status),
       event: (event) => this.onEvent(event),
       snapshot: (snapshot) => this.onSnapshot(snapshot),
       latency: (latency) => this.ui.setLatency(latency),
     });
+    this.world = null;
     this.localId = 0;
     this.local = null;
     this.names = new Map();
     this.pending = [];
+    this.remoteFrames = [];
     this.sequence = 0;
+    this.serverTick = 0;
+    this.capacity = 10;
     this.accumulator = 0;
     this.lastFrame = performance.now();
-    this.deadUntil = 0;
-    this.capacity = 96;
+    this.lastFireNonce = 0;
     this.started = false;
     requestAnimationFrame((time) => this.frame(time));
   }
@@ -36,7 +47,6 @@ export class SteppeStrike {
   start(name) {
     if (this.started) return;
     this.started = true;
-    this.audio.unlock();
     this.ui.enterGame(this.input.touch);
     this.input.capture();
     this.net.connect(name);
@@ -46,126 +56,135 @@ export class SteppeStrike {
     if (message.t === 'welcome') {
       this.localId = message.id;
       this.capacity = message.maxPlayers;
+      this.world = new CombatMap();
+      this.view.setWorld(this.world);
       this.names.clear();
       for (const player of message.players) this.names.set(player.id, player);
-      this.ui.setInitialRoster(message.players);
-      this.ui.setScores(message.scores);
-      this.ui.updatePopulation(message.players.length, this.capacity);
-      this.ui.announce(message.reconnected ? 'ТУЛААНД ДАХИН ОРЛОО' : 'ТУЛААНД НЭГДЛЭЭ');
+      this.ui.updatePopulation(this.names.size, this.capacity);
+      this.ui.setMatch(message.match);
+      this.ui.announce(message.reconnected ? 'ТОГЛОЛТОД БУЦАЖ ОРЛОО' : 'ТУЛААНД НЭГДЛЭЭ');
       return;
     }
     if (message.t === 'join' || message.t === 'rejoin') {
-      const player = { id: message.id, name: message.name, team: message.team };
-      this.names.set(message.id, { ...this.names.get(message.id), ...player });
-      this.ui.addPlayer(player);
+      this.names.set(message.id, message);
       this.ui.updatePopulation(this.names.size, this.capacity);
-      if (message.id !== this.localId) {
-        this.ui.announce(`${message.name} ${message.t === 'join' ? 'нэгдлээ' : 'буцаж ирлээ'}`, 1200);
-      }
+      if (message.id !== this.localId) this.ui.announce(`${message.name} нэгдлээ`, 1_000);
       return;
     }
     if (message.t === 'leave') {
       this.names.delete(message.id);
-      this.ui.removePlayer(message.id);
       this.ui.updatePopulation(this.names.size, this.capacity);
       return;
     }
+    if (message.t === 'match') {
+      this.ui.setMatch(message);
+      if (message.phase === 'live') this.ui.announce(`ҮЕ ${message.round} · ЭХЭЛЛЭЭ`);
+      if (message.phase === 'round_end') this.ui.announce('ҮЕ ДУУСЛАА', 2_400);
+      if (message.phase === 'match_end') this.ui.announce('ТОГЛОЛТ ДУУСЛАА', 5_000);
+      return;
+    }
     if (message.t === 'shot') {
-      const shooter = this.names.get(message.shooter);
-      this.view.trace(message.from, message.to, shooter?.team || 0);
-      if (message.shooter === this.localId) {
-        this.view.kick();
-        this.audio.shot();
-        if (message.victim) {
-          this.ui.hitmarker(message.headshot);
-          this.audio.hit(message.headshot);
-        }
-      }
+      this.view.fire(message.shooter);
+      if (message.shooter === this.localId) this.ui.shotFeedback(message.hit && !message.friendly);
+      if (message.target === this.localId && message.damage) this.ui.damageFeedback();
       return;
     }
     if (message.t === 'kill') {
-      this.ui.addKill(message.killer, message.victim, message.headshot);
-      this.ui.setScores(message.scores);
-      if (message.victim === this.localId) {
-        this.deadUntil = performance.now() + 3000;
-        this.audio.death();
-      }
+      const killer = this.names.get(message.killer)?.name || 'Player';
+      const victim = this.names.get(message.victim)?.name || 'Player';
+      this.ui.addKill(killer, victim, message.headshot);
+      if (message.victim === this.localId) this.ui.announce('ТА УНАЛАА · ДАРААГИЙН ҮЕИЙГ ХҮЛЭЭНЭ ҮҮ', 3_000);
       return;
     }
-    if (message.t === 'spawn' && message.id === this.localId) {
-      this.deadUntil = 0;
-      this.ui.setDead(false);
-      this.ui.announce('ТУЛААНД БУЦАЖ ОРЛОО', 1000);
-      return;
-    }
-    if (message.t === 'gameover') {
-      this.ui.announce(message.winner === 1 ? 'ХӨХ БАГ ЯЛЛАА' : 'УЛААН БАГ ЯЛЛАА', 7000);
-      return;
-    }
-    if (message.t === 'matchstart') {
-      this.ui.setScores(message.scores);
-      this.ui.announce('ШИНЭ ТУЛААН ЭХЭЛЛЭЭ');
-      return;
-    }
-    if (message.t === 'error') this.ui.announce(message.reason, 5000);
+    if (message.t === 'error') this.ui.announce(message.reason, 4_000);
   }
 
   onSnapshot(snapshot) {
+    if (!this.world) return;
+    this.serverTick = snapshot.tick;
+    this.remoteFrames.push(snapshot);
+    if (this.remoteFrames.length > 12) this.remoteFrames.shift();
     const authoritative = snapshot.players.find((player) => player.id === this.localId);
     if (!authoritative) return;
-    const oldHp = this.local?.hp ?? authoritative.hp;
-    const wasAlive = this.local?.alive;
     this.pending = this.pending.filter((entry) => !sequenceAcked(entry.seq, snapshot.ack));
-    const predicted = {
-      ...authoritative,
-      jumpHeld: this.local?.jumpHeld || false,
-    };
-    if (authoritative.alive) {
+    const predicted = { ...authoritative, jumpHeld: this.local?.jumpHeld || false };
+    if (authoritative.flags & PLAYER_FLAG.ALIVE) {
       for (const entry of this.pending) {
         predicted.yaw = entry.yaw;
         predicted.pitch = entry.pitch;
-        stepMovement(predicted, entry, DT);
+        stepMovement(this.world, predicted, entry, DT);
       }
     }
+    const firstState = !this.local;
     this.local = predicted;
-    if (authoritative.hp < oldHp) this.ui.damage();
-    if (wasAlive === false && authoritative.alive) {
-      this.input.setLook(authoritative.yaw, authoritative.pitch);
-      this.deadUntil = 0;
-    }
-    this.view.syncPlayers(snapshot.players, this.names, this.localId);
-    this.ui.syncKills(snapshot.players);
-    this.ui.updatePopulation(snapshot.players.length, this.capacity);
-    this.ui.updateLocal(authoritative);
+    if (firstState) this.input.setLook(authoritative.yaw, authoritative.pitch);
+    this.ui.setVitals(authoritative);
   }
 
   simulationStep() {
-    if (!this.local || !this.localId) return;
+    if (!this.local || !this.localId || !this.world) return;
     const input = this.input.read();
     this.sequence = (this.sequence + 1) & 0xffff;
     const entry = { seq: this.sequence, ...input };
     this.pending.push(entry);
-    if (this.pending.length > 120) this.pending.shift();
-    this.net.sendInput(this.sequence, input);
+    if (this.pending.length > 180) this.pending.shift();
+    this.net.sendInput(this.sequence, input, this.serverTick);
+    if (input.fireNonce !== this.lastFireNonce) {
+      this.lastFireNonce = input.fireNonce;
+      this.view.fire(this.localId);
+    }
+    if (!(this.local.flags & PLAYER_FLAG.ALIVE)) return;
     this.local.yaw = input.yaw;
     this.local.pitch = input.pitch;
-    if (this.local.alive) stepMovement(this.local, input, DT);
+    stepMovement(this.world, this.local, input, DT);
+  }
+
+  interpolatedPlayers() {
+    const after = this.remoteFrames.at(-1);
+    if (!after) return [];
+    const targetTick = after.tick - 6;
+    let before = this.remoteFrames[0];
+    let next = after;
+    for (let index = 1; index < this.remoteFrames.length; index += 1) {
+      if (this.remoteFrames[index].tick >= targetTick) {
+        before = this.remoteFrames[index - 1];
+        next = this.remoteFrames[index];
+        break;
+      }
+    }
+    const span = Math.max(1, next.tick - before.tick);
+    const amount = Math.max(0, Math.min(1, (targetTick - before.tick) / span));
+    const previous = new Map(before.players.map((player) => [player.id, player]));
+    return next.players.map((player) => {
+      const old = previous.get(player.id);
+      return old ? mixPlayer(old, player, amount) : player;
+    });
+  }
+
+  spectatorTarget(players) {
+    if (!this.local || (this.local.flags & PLAYER_FLAG.ALIVE)) return null;
+    return players.find((player) => (
+      player.id !== this.localId
+      && player.team === this.local.team
+      && (player.flags & PLAYER_FLAG.ALIVE)
+    )) || players.find((player) => (
+      player.id !== this.localId && (player.flags & PLAYER_FLAG.ALIVE)
+    )) || null;
   }
 
   frame(time) {
-    const elapsed = Math.min(.1, (time - this.lastFrame) / 1000);
+    const elapsed = Math.min(0.1, (time - this.lastFrame) / 1_000);
     this.lastFrame = time;
     this.accumulator += elapsed;
     while (this.accumulator >= DT) {
       this.simulationStep();
       this.accumulator -= DT;
     }
-    if (this.local && !this.local.alive) {
-      this.ui.setDead(true, (this.deadUntil - performance.now()) / 1000);
-    } else {
-      this.ui.setDead(false);
-    }
-    this.view.render(this.local, elapsed);
+    const players = this.interpolatedPlayers();
+    const spectator = this.spectatorTarget(players);
+    this.view.syncPlayers(players, this.names, this.localId, spectator?.id);
+    this.view.render(this.local, elapsed, spectator);
+    this.ui.setSpectating(spectator ? this.names.get(spectator.id)?.name : '');
     requestAnimationFrame((next) => this.frame(next));
   }
 }

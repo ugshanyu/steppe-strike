@@ -4,42 +4,66 @@ import {
 } from '../shared/protocol.js';
 
 export class RealtimeClient {
-  constructor(handlers = {}) {
+  constructor(resolveUrl, handlers = {}) {
+    this.resolveUrl = resolveUrl;
     this.handlers = handlers;
     this.socket = null;
     this.name = '';
-    this.session = localStorage.getItem('steppe-session') || crypto.randomUUID();
     this.started = false;
     this.reconnectAttempt = 0;
+    this.generation = 0;
     this.pingTimer = null;
+    this.reconnectTimer = null;
   }
 
   connect(name) {
     this.name = name;
     this.started = true;
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+    this.open();
+  }
+
+  async open() {
+    if (!this.started) return;
+    const generation = ++this.generation;
+    this.handlers.status?.(this.reconnectAttempt ? 'reconnecting' : 'connecting');
+    try {
+      const url = await this.resolveUrl();
+      if (!this.started || generation !== this.generation) return;
+      this.openSocket(url, generation);
+    } catch {
+      if (generation === this.generation) this.scheduleReconnect();
+    }
+  }
+
+  openSocket(url, generation) {
+    const socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
-    this.handlers.status?.('connecting');
-
+    const timeout = setTimeout(() => socket.close(), 8_000);
     socket.addEventListener('open', () => {
-      this.reconnectAttempt = 0;
-      socket.send(JSON.stringify({
-        t: 'hello', version: 1, name: this.name, session: this.session,
-      }));
-      this.handlers.status?.('connected');
+      if (generation !== this.generation) return socket.close();
+      clearTimeout(timeout);
+      socket.send(JSON.stringify({ t: 'hello', version: 2, name: this.name }));
       this.startPings();
     });
     socket.addEventListener('message', (event) => this.onMessage(event.data));
     socket.addEventListener('close', (event) => {
+      clearTimeout(timeout);
       this.stopPings();
       if (socket !== this.socket || !this.started) return;
       this.handlers.status?.(event.code === 4001 ? 'full' : 'reconnecting');
-      const delay = Math.min(8000, 500 * 2 ** this.reconnectAttempt++);
-      setTimeout(() => this.connect(this.name), delay + Math.random() * 250);
+      this.scheduleReconnect();
     });
     socket.addEventListener('error', () => {});
+  }
+
+  scheduleReconnect() {
+    if (!this.started || this.reconnectTimer) return;
+    const delay = Math.min(8_000, 500 * 1.7 ** this.reconnectAttempt++);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.open();
+    }, delay * (0.85 + Math.random() * 0.3));
   }
 
   onMessage(data) {
@@ -47,8 +71,8 @@ export class RealtimeClient {
       let message;
       try { message = JSON.parse(data); } catch { return; }
       if (message.t === 'welcome') {
-        this.session = message.session;
-        localStorage.setItem('steppe-session', message.session);
+        this.reconnectAttempt = 0;
+        this.handlers.status?.('connected');
       }
       this.handlers.event?.(message);
       return;
@@ -62,17 +86,26 @@ export class RealtimeClient {
     }
   }
 
-  sendInput(seq, input) {
+  sendInput(seq, input, viewTick) {
     if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(encodeInput(seq, input.buttons, input.yaw, input.pitch));
+      this.socket.send(encodeInput(
+        seq,
+        input.buttons,
+        input.yaw,
+        input.pitch,
+        input.fireNonce,
+        viewTick,
+      ));
     }
   }
 
   startPings() {
     this.stopPings();
     this.pingTimer = setInterval(() => {
-      if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(encodePing(performance.now()));
-    }, 2000);
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(encodePing(performance.now()));
+      }
+    }, 2_000);
   }
 
   stopPings() {

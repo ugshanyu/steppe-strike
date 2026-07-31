@@ -1,99 +1,84 @@
 # Steppe Strike
 
-**A global realtime voxel FPS built for fast play from Mongolia.**
+**The original Steppe World, minimized into a real-time team match with shooting added.**
 
-Steppe Strike drops every player into the same public block-world team battle.
-There are no accounts, room codes, downloads, or map menus: choose a name and
-join. The launch server supports up to **96 simultaneous players** in one world.
+Steppe Strike keeps the approved Minecraft-style world foundation: deterministic
+terrain, hills, coastlines, water, soil, caves, ore, trees, voxel collision,
+chunk rendering, and the original block palette. Competitive rooms use one
+roughly 80×56-block region of that world and make it immutable for the match.
 
-**Play:** [steppe-strike-production.up.railway.app](https://steppe-strike-production.up.railway.app)
+The game is Mongolian-first and is built for 2–10 players per Usion room.
 
-## What is playable
+## Current match
 
-- One shared Mongolian-steppe-inspired voxel battlefield
-- Automatic Blue / Red team balancing
-- Authoritative AK-style hitscan combat
-- 100 HP, 30-round magazine, reloads, headshots, kill feed, and scoreboard
-- Three-second respawns with brief spawn protection
-- First team to 50 eliminations wins; the next battle starts automatically
-- Instant guest identity with reconnect recovery
-- Desktop pointer-lock controls and phone-first dual-zone touch controls
-- Mongolian-first interface with universally recognizable FPS HUD patterns
+- Original Steppe World terrain seed: `7282026`
+- Small protected world boundary; no replacement arena terrain
+- Balanced attacker and defender teams
+- Warmup, live round, round end, score limit, and match end
+- One server-owned rifle with ammo, reload, fire rate, movement/burst spread,
+  body damage, and headshots
+- Server-owned health, death, spectating, round respawn, scores, and results
+- 60 Hz authoritative simulation and 20 Hz compact binary snapshots
+- Local prediction/reconciliation and 100 ms remote-player interpolation
+- Maximum 200 ms target rewind for lag-compensated hits
+- Equivalent keyboard/mouse and touch control surfaces
+
+Creative mining, placement, persistence, and the full procedural world engine
+remain in the repository. Competitive rooms intentionally freeze block edits so
+the server and every player always use the same collision and line-of-sight map.
 
 ## Controls
 
 | Desktop | Action | Mobile |
 |---|---|---|
 | `WASD` / arrows | Move | Left joystick |
-| Mouse | Aim | Drag on right side |
-| Left click | Fire | Fire circle |
-| `Space` | Jump | Up button |
-| `R` | Reload | R button |
-| `Tab` | Scoreboard | — |
+| Mouse | Look | Swipe the world |
+| Left click | Fire | Hold `ГАЛ` |
+| `R` | Reload | Tap `R` |
+| `Space` | Jump | Tap `↑` |
 
-## Architecture
+## Realtime architecture
 
 ```text
+Usion
+  ├─ matchmaking, room membership, invites
+  ├─ short-lived room-bound RS256 access token
+  └─ leaderboard/result ingestion
+            │ direct WebSocket
+            ▼
+Steppe Strike server
+  ├─ isolated roomId → Match state
+  ├─ 2–10 retained seats and reconnect grace
+  ├─ drift-corrected 60 Hz simulation
+  ├─ movement, collision, rifle, health, teams, rounds
+  ├─ transform history and bounded lag compensation
+  └─ HMAC-signed, idempotent final result
+            │
+            ▼
 Browser
-  ├─ Three.js voxel renderer
-  ├─ predicted local movement
-  ├─ smoothed remote players
-  └─ 9-byte input packets at 30 Hz
-          │ secure WebSocket
-          ▼
-Railway / Singapore
-  ├─ static Vite client
-  ├─ authoritative 30 Hz world
-  ├─ 15 Hz binary snapshots
-  ├─ movement + collision validation
-  └─ server-owned hits, ammo, teams, deaths, and respawns
+  ├─ unchanged deterministic Steppe World generation
+  ├─ compact 60 Hz intentions
+  ├─ local prediction and server reconciliation
+  └─ buffered remote interpolation
 ```
 
-The realtime foundation follows the proven patterns in
-[`ugshanyu/tank`](https://github.com/ugshanyu/tank):
-
-- a fixed-rate authoritative server
-- shared client/server movement code
-- client prediction and server reconciliation
-- compact binary hot-path messages
-- bounded payloads and message rates
-- disabled WebSocket compression and TCP `NODELAY`
-- snapshots skipped for clients with socket backpressure
-- real two-client protocol smoke tests
-
-The voxel terrain is deterministic and bundled with both sides, so it consumes
-no realtime bandwidth. At full launch capacity, each snapshot is about 2.3 KB
-before WebSocket framing, or roughly 35 KB/s per player at 15 Hz.
-
-## Honest scale boundary
-
-Version 1 is a **96-player single-world launch**, not an unbounded distributed
-simulation. A single authoritative process is intentional: every connected
-player sees the same battle and hits never disagree across replicas.
-
-The next scale step is spatial zones backed by Redis presence/pub-sub, with
-handoff between adjacent authoritative workers. Do not add Railway replicas to
-this service without that coordination layer; independent replicas would create
-separate worlds.
+Usion is never in the per-frame gameplay path. It authorizes entry before the
+socket connects and receives one signed result after the match.
 
 ## Security and reliability
 
-- The client sends inputs, never positions, damage, scores, or hit claims.
-- Names are normalized, control characters and markup are removed, and length
-  is capped.
-- WebSocket frames are limited to 512 bytes and connections to 90 messages/s.
-- The server caps players, checks browser origins when `ALLOWED_ORIGINS` is set,
-  enforces fire rate/ammo/reload rules, and rejects friendly-fire claims by
-  design.
-- Ping/pong liveness, reconnect grace, input acknowledgement, and socket
-  backpressure prevent dead or slow clients from degrading the world.
-- HTTP responses use a restrictive Content Security Policy and browser security
-  headers.
-- `/healthz` exposes safe runtime health, player count, tick, uptime, capacity,
-  and Railway replica region.
-
-Guest names and reconnect IDs stay in browser local storage. There is no player
-database and no chat surface in this release.
+- Production sockets accept only Usion RS256 tokens scoped to the exact
+  service, room, session, audience, issuer, expiry, and `play` permission.
+- Unsigned development users require `DEV_ALLOW_UNSIGNED=1` and cannot be
+  enabled in production.
+- Clients send intentions, not positions, hits, damage, health, scores, or
+  winners.
+- World collision and bullet occlusion use the same deterministic block map.
+- Payload size, message rate, socket backpressure, reconnect seats, and rewind
+  time are bounded.
+- The fixed ticker reports p95/p99 execution time, drift, overruns, and dropped
+  catch-up steps through `/healthz`.
+- Direct results use HMAC-SHA256 and an idempotency key.
 
 ## Local development
 
@@ -102,19 +87,11 @@ Requires Node.js 20 or newer.
 ```bash
 npm install
 npm run build
-npm start
+DEV_ALLOW_UNSIGNED=1 npm start
 ```
 
-Open <http://localhost:8080>.
-
-For live client editing, run the realtime server and Vite in separate terminals:
-
-```bash
-npm start
-npm run dev
-```
-
-Vite proxies `/ws` and `/healthz` to port 8080.
+Open <http://localhost:8080>. Local rooms can be selected with
+`?room=local-room`.
 
 ## Verification
 
@@ -122,20 +99,25 @@ Vite proxies `/ws` and `/healthz` to port 8080.
 npm run check
 ```
 
-This runs:
+This runs unit tests, a real WebSocket smoke match, an adverse-network
+simulation at 150 ms latency / 60 ms jitter / 5% loss, a 500-player load gate,
+and the production build.
 
-- protocol codec tests
-- world collision and shared movement tests
-- server-authoritative combat tests
-- a real two-client WebSocket match covering join, movement, headshot kill,
-  death, respawn, malformed input resilience, and same-session reconnect
-- the production Vite build
+The current local load gate simulates 50 simultaneous ten-player rooms:
 
-To verify an already-deployed server with two independent secure-WebSocket
-clients:
+```text
+500 players · 60 Hz · tick p99 ≈4 ms · frame budget 16.667 ms
+```
+
+Authenticated production verification requires two access tokens issued by the
+same Usion room:
 
 ```bash
-LIVE_URL=wss://steppe-strike-production.up.railway.app/ws npm run test:live
+LIVE_URL=wss://HOST/ws \
+LIVE_ROOM_ID=ROOM \
+LIVE_ACCESS_TOKEN_ALPHA=TOKEN \
+LIVE_ACCESS_TOKEN_BRAVO=TOKEN \
+npm run test:live
 ```
 
 ## Configuration
@@ -143,13 +125,16 @@ LIVE_URL=wss://steppe-strike-production.up.railway.app/ws npm run test:live
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `8080` | HTTP and WebSocket port |
-| `NODE_ENV` | `development` | Enables production origin behavior |
-| `ALLOWED_ORIGINS` | empty | Comma-separated browser origins |
-| `TEST_MODE` | `0` | Deterministic close spawns for automated smoke tests |
+| `NODE_ENV` | `development` | Production security boundary |
+| `SERVICE_ID` | `steppe-strike` | Usion service identity |
+| `USION_JWKS_URL` | Usion production JWKS | RS256 access verification |
+| `USION_API_URL` | `https://mobile.mongolai.mn` | Signed result destination |
+| `USION_RESULT_KEY_ID` | empty | Registered result-signing key |
+| `USION_RESULT_SECRET` | empty | Result HMAC secret |
+| `ALLOWED_ORIGINS` | empty | Optional browser-origin allowlist |
+| `DEV_ALLOW_UNSIGNED` | `0` | Explicit local-only development access |
+| `TEST_MODE` | `0` | Short automated-test match timings |
 
-## Railway
-
-The repository contains `railway.json` with the production build, start
-command, `/healthz` check, and restart policy. The production service is kept in
-Railway's Singapore region (`asia-southeast1-eqsg3a`), the closest available
-Railway deployment region to the primary Mongolian audience.
+`railway.json` defines the Railway build, health check, start command, and
+restart policy. Keep the Usion service unpublished until authenticated
+production access, result submission, desktop play, and touch play all pass.

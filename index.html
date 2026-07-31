@@ -3,22 +3,23 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-    <meta name="theme-color" content="#101914">
-    <meta name="description" content="Steppe Strike — Монголын тал нутгаас сэдэвлэсэн realtime voxel FPS.">
+    <meta name="theme-color" content="#172319">
+    <meta name="description" content="Steppe Strike — Монголд зориулсан бодит цагийн 5v5 блок тулаан.">
     <title>Steppe Strike</title>
     <link rel="stylesheet" href="/client/styles.css">
     <link rel="stylesheet" href="/client/mobile.css">
+    <script defer src="https://usions.com/sdk/v2/2.27.0/usion-sdk.js"></script>
   </head>
   <body>
     <main id="game">
-      <canvas id="game-canvas" aria-label="Steppe Strike game world"></canvas>
+      <canvas id="game-canvas" aria-label="Steppe Strike real-time block arena"></canvas>
 
       <section id="join-screen" class="join-screen">
         <div class="join-card">
-          <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
-          <p class="eyebrow">MONGOLIA · GLOBAL SERVER</p>
+          <div class="brand-blocks" aria-hidden="true"><i></i><i></i><i></i></div>
+          <p class="eyebrow">MONGOLIA · REAL-TIME 5V5</p>
           <h1>STEPPE<br><span>STRIKE</span></h1>
-          <p class="tagline">Талын блок ертөнц. Нэг нийтийн тулаан.<br>Орж ирээд шууд тулалд.</p>
+          <p class="tagline">Блок ертөнц. Хоёр баг. Нэг ялагч.<br>Хурдан хөдөлж, оновчтой буудаж, үе бүрийг ав.</p>
           <form id="join-form">
             <label for="player-name">Таны нэр</label>
             <div class="name-row">
@@ -28,13 +29,14 @@
           </form>
           <div class="control-hints">
             <span><kbd>WASD</kbd> ХӨДЛӨХ</span>
-            <span><kbd>CLICK</kbd> БУУДАХ</span>
-            <span><kbd>R</kbd> СУМЛАХ</span>
+            <span><kbd>LEFT CLICK</kbd> БУУДАХ</span>
+            <span><kbd>R</kbd> ЦЭНЭГЛЭХ</span>
+            <span><kbd>SPACE</kbd> ҮСРЭХ</span>
             <span class="phone-hint">УТАСНЫ УДИРДЛАГА БЭЛЭН</span>
           </div>
-          <p id="join-status" class="join-status">Холболт бэлэн · Singapore edge</p>
+          <p id="join-status" class="join-status">Usion өрөөтэй холбож байна…</p>
         </div>
-        <p class="version">EARLY ACCESS · V1.0</p>
+        <p class="version">COMPETITIVE FOUNDATION · PROTOCOL 2</p>
       </section>
 
       <section id="hud" class="hud hidden" aria-live="polite">
@@ -45,50 +47,33 @@
             <span id="connection-status"><i></i> ХОЛБОГДСОН</span>
           </div>
         </div>
-        <div class="team-score">
-          <div class="blue"><span>ХӨХ</span><b id="blue-score">0</b></div>
-          <em>50</em>
-          <div class="red"><b id="red-score">0</b><span>УЛААН</span></div>
+        <div id="match-score" class="match-score">
+          <b id="attack-score">0</b>
+          <span id="round-state">ТОГЛОГЧ ХҮЛЭЭЖ БАЙНА</span>
+          <b id="defend-score">0</b>
         </div>
-        <div id="population" class="population">1 / 96</div>
+        <div id="population" class="population">0 / 10</div>
+        <div class="crosshair"><i></i><i></i></div>
+        <div id="damage-vignette" class="damage-vignette"></div>
+        <div id="announcement" class="announcement hidden"></div>
+        <div id="spectator-state" class="spectator-state hidden"></div>
         <div id="kill-feed" class="kill-feed"></div>
-        <div id="crosshair" class="crosshair"><i></i><i></i><i></i><i></i></div>
-        <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
-        <div id="damage-flash" class="damage-flash"></div>
-
-        <div class="bottom-hud">
-          <div class="health-block">
-            <span>АМЬ</span>
-            <strong id="health">100</strong>
-            <div><i id="health-bar"></i></div>
-          </div>
-          <div class="weapon-block">
-            <span id="weapon-state">AK-47</span>
-            <div><strong id="ammo">30</strong><b>/ 30</b></div>
-          </div>
+        <div class="vitals">
+          <small>АМЬ</small>
+          <b id="health">100</b>
+        </div>
+        <div class="weapon-state">
+          <small id="reload-state">SERVICE RIFLE</small>
+          <b id="ammo">30</b><span>/ <i id="reserve-ammo">90</i></span>
         </div>
         <div id="latency" class="latency">— MS</div>
-        <div id="announcement" class="announcement hidden"></div>
-        <div id="death-screen" class="death-screen hidden">
-          <span>ТУЛААНД УНАВ</span>
-          <strong id="respawn-time">3</strong>
-          <small>секундын дараа эргэн орно</small>
-        </div>
-        <div id="scoreboard" class="scoreboard hidden">
-          <header><span>НИЙТИЙН ТУЛААН</span><b>STEPPE STRIKE</b></header>
-          <div class="score-columns">
-            <section><h2>ХӨХ БАГ</h2><div id="blue-roster"></div></section>
-            <section><h2>УЛААН БАГ</h2><div id="red-roster"></div></section>
-          </div>
-          <footer><kbd>TAB</kbd> ДАРЖ ХААХ</footer>
-        </div>
       </section>
 
       <section id="mobile-controls" class="mobile-controls hidden" aria-label="Touch controls">
         <div id="joystick" class="joystick"><i id="joystick-knob"></i></div>
-        <button id="fire-button" class="fire-button" aria-label="Буудах"><i></i></button>
+        <button id="fire-button" class="action-button fire-button" aria-label="Буудах">ГАЛ</button>
+        <button id="reload-button" class="action-button reload-button" aria-label="Цэнэглэх">R</button>
         <button id="jump-button" class="round-button jump-button" aria-label="Үсрэх">↑</button>
-        <button id="reload-button" class="round-button reload-button" aria-label="Сумлах">R</button>
       </section>
     </main>
     <script type="module" src="/client/main.js"></script>
