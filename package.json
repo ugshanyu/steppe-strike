@@ -3,19 +3,21 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "One persistent multiplayer block world for Mongolia.",
+  "description": "Mongolian-first real-time 5v5 voxel arena on Usion.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "start": "node server/index.js",
     "build": "vite build",
     "test": "node --test test/*.test.js && node test/smoke.js",
+    "test:load": "node test/load.js",
     "test:live": "node test/live-smoke.js",
-    "check": "npm test && npm run build"
+    "check": "npm test && npm run test:load && npm run build"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "jose": "^6.2.5",
     "three": "^0.179.1",
     "ws": "^8.18.3"
   },

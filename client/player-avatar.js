@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { blockDef, HOTBAR_BLOCKS } from '../shared/blocks.js';
+import { PLAYER_FLAG } from '../shared/constants.js';
 
 const material = (color) => new THREE.MeshLambertMaterial({ color });
 const box = (width, height, depth, color) => {
@@ -29,40 +29,65 @@ function nameSprite(name) {
   return sprite;
 }
 
+function createRifle() {
+  const rifle = new THREE.Group();
+  const body = box(0.11, 0.12, 0.72, 0x222925);
+  const stock = box(0.15, 0.18, 0.26, 0x61472f);
+  const magazine = box(0.09, 0.24, 0.16, 0x303632);
+  stock.position.z = 0.38;
+  magazine.position.set(0, -0.15, -0.03);
+  rifle.add(body, stock, magazine);
+  rifle.rotation.x = -0.12;
+  return rifle;
+}
+
 export class PlayerAvatar {
-  constructor(name, id) {
-    const shirt = new THREE.Color().setHSL(((id * 0.173) % 1), 0.42, 0.5).getHex();
+  constructor(name) {
     this.group = new THREE.Group();
     this.visual = new THREE.Group();
     this.group.add(this.visual);
-    this.torso = box(0.7, 0.76, 0.38, shirt);
+    this.torso = box(0.7, 0.76, 0.38, 0x4d704b);
     this.torso.position.y = 1.12;
     this.head = box(0.48, 0.48, 0.48, 0xd4a37a);
     this.head.position.y = 1.73;
     this.legs = box(0.56, 0.66, 0.34, 0x29352f);
     this.legs.position.y = 0.45;
-    this.held = box(0.28, 0.28, 0.28, blockDef(HOTBAR_BLOCKS[0]).color);
-    this.held.position.set(0.46, 1.23, -0.32);
-    this.visual.add(this.torso, this.head, this.legs, this.held, nameSprite(name));
+    this.rifle = createRifle();
+    this.rifle.position.set(0.37, 1.25, -0.38);
+    this.visual.add(this.torso, this.head, this.legs, this.rifle, nameSprite(name));
     this.initialized = false;
-    this.lastSlot = -1;
+    this.lastTeam = 0;
+    this.recoil = 0;
+    this.targetPosition = new THREE.Vector3();
+  }
+
+  fire() {
+    this.recoil = 1;
   }
 
   update(state, alpha) {
+    this.group.visible = Boolean(state.flags & PLAYER_FLAG.ALIVE);
+    if (!this.group.visible) return;
     if (!this.initialized) {
       this.group.position.set(state.x, state.y, state.z);
       this.group.rotation.y = state.yaw;
       this.initialized = true;
     } else {
-      this.group.position.lerp(new THREE.Vector3(state.x, state.y, state.z), alpha);
-      const delta = Math.atan2(Math.sin(state.yaw - this.group.rotation.y),
-        Math.cos(state.yaw - this.group.rotation.y));
+      this.targetPosition.set(state.x, state.y, state.z);
+      this.group.position.lerp(this.targetPosition, alpha);
+      const delta = Math.atan2(
+        Math.sin(state.yaw - this.group.rotation.y),
+        Math.cos(state.yaw - this.group.rotation.y),
+      );
       this.group.rotation.y += delta * alpha;
     }
     this.head.rotation.x = -state.pitch * 0.3;
-    if (state.slot !== this.lastSlot) {
-      this.lastSlot = state.slot;
-      this.held.material.color.setHex(blockDef(HOTBAR_BLOCKS[state.slot] || HOTBAR_BLOCKS[0]).color);
+    this.rifle.rotation.x = -0.12 - state.pitch * 0.45 + this.recoil * 0.08;
+    this.rifle.position.z = -0.38 + this.recoil * 0.08;
+    this.recoil *= 0.72;
+    if (state.team !== this.lastTeam) {
+      this.lastTeam = state.team;
+      this.torso.material.color.setHex(state.team === 1 ? 0xc78537 : 0x417bb3);
     }
   }
 

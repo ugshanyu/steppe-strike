@@ -1,104 +1,121 @@
 import { WebSocketServer } from 'ws';
-import { MAX_PLAYERS, MSG, SNAPSHOT_RATE, TICK_RATE } from '../shared/constants.js';
+import {
+  MAX_PLAYERS, MSG, SNAPSHOT_RATE, TICK_RATE,
+} from '../shared/constants.js';
 import {
   decodeInput, encodePong, encodeSnapshot, INPUT_BYTES,
 } from '../shared/protocol.js';
 import {
-  ALLOWED_ORIGINS, IS_PRODUCTION, SERVICE_ID, USION_VERIFY_URL,
+  ALLOWED_ORIGINS, DEV_ALLOW_UNSIGNED, IS_PRODUCTION, SERVICE_ID, USION_JWKS_URL,
 } from './config.js';
-import { verifyIframeToken } from './usion-auth.js';
+import { createUsionDirectTokenVerifier } from './usion-direct-auth.js';
 
-const HELLO_TIMEOUT_MS = 5000;
-const MAX_BUFFERED_BYTES = 128 * 1024;
+const HELLO_TIMEOUT_MS = 5_000;
+const MAX_BUFFERED_BYTES = 128 * 1_024;
+const ROOM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
-export function attachRealtime(server, world) {
+const sendJson = (ws, payload) => {
+  if (ws.readyState === ws.OPEN && ws.bufferedAmount < MAX_BUFFERED_BYTES) {
+    ws.send(JSON.stringify(payload));
+  }
+};
+
+function devIdentity(token, roomId) {
+  if (!DEV_ALLOW_UNSIGNED || !token.startsWith('dev:')) return null;
+  const [, userId, sessionId = userId] = token.split(':');
+  if (!userId) return null;
+  return {
+    userId: userId.slice(0, 128),
+    sessionId: sessionId.slice(0, 128),
+    roomId,
+    serviceId: SERVICE_ID,
+    permissions: ['play'],
+  };
+}
+
+export function attachRealtime(server, rooms, {
+  verifyToken = createUsionDirectTokenVerifier({
+    serviceId: SERVICE_ID,
+    jwksUrl: USION_JWKS_URL,
+  }),
+} = {}) {
   const wss = new WebSocketServer({
     noServer: true,
     perMessageDeflate: false,
-    maxPayload: 8192,
+    maxPayload: 8_192,
   });
 
-  const sendJson = (ws, payload) => {
-    if (ws.readyState === ws.OPEN && ws.bufferedAmount < MAX_BUFFERED_BYTES) {
-      ws.send(JSON.stringify(payload));
-    }
-  };
-  const broadcast = (payload) => {
+  const broadcast = (room, payload) => {
     const serialized = JSON.stringify(payload);
-    for (const player of world.connectedPlayers()) {
-      if (player.ws.readyState === player.ws.OPEN && player.ws.bufferedAmount < MAX_BUFFERED_BYTES) {
-        player.ws.send(serialized);
+    for (const seat of room.match.connectedSeats()) {
+      const ws = seat.ws;
+      if (ws?.readyState === ws.OPEN && ws.bufferedAmount < MAX_BUFFERED_BYTES) {
+        ws.send(serialized);
       }
     }
   };
-  world.emit = broadcast;
-  world.send = (player, payload) => sendJson(player.ws, payload);
+  rooms.onEvent = broadcast;
 
   server.on('upgrade', (request, socket, head) => {
-    const pathname = new URL(request.url, 'http://localhost').pathname;
+    const url = new URL(request.url, 'http://localhost');
     const origin = request.headers.origin || '';
     const allowed = !ALLOWED_ORIGINS.size || ALLOWED_ORIGINS.has(origin)
       || (!IS_PRODUCTION && /^https?:\/\/localhost(?::\d+)?$/.test(origin));
-    if (pathname !== '/ws' || !allowed) {
+    if (url.pathname !== '/ws' || !allowed) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }
+    request.direct = {
+      roomId: url.searchParams.get('room_id') || '',
+      token: url.searchParams.get('token') || '',
+    };
     wss.handleUpgrade(request, socket, head, (ws) => wss.emit('connection', ws, request));
   });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, request) => {
     ws.isAlive = true;
-    ws.player = null;
-    ws.authenticating = false;
+    ws.seat = null;
+    ws.room = null;
     ws.messageWindow = { started: Date.now(), count: 0 };
-    const helloTimer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
-    ws.on('pong', () => { ws.isAlive = true; });
+    const timer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
+    const { roomId, token } = request.direct;
+    const authenticate = () => {
+      if (!ROOM_ID.test(roomId)) return Promise.reject(new Error('invalid room'));
+      const development = devIdentity(token, roomId);
+      return development ? Promise.resolve(development) : verifyToken(token, { roomId });
+    };
 
-    ws.on('message', (data, isBinary) => {
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('message', async (data, isBinary) => {
       const now = Date.now();
-      if (now - ws.messageWindow.started >= 1000) ws.messageWindow = { started: now, count: 0 };
-      if (++ws.messageWindow.count > 90) {
-        ws.close(4008, 'rate limit');
-        return;
+      if (now - ws.messageWindow.started >= 1_000) {
+        ws.messageWindow = { started: now, count: 0 };
       }
-      if (!ws.player) {
-        if (isBinary || ws.authenticating) return;
+      if (++ws.messageWindow.count > 90) return ws.close(4008, 'rate limit');
+      if (!ws.seat) {
+        if (isBinary || ws.joining) return;
         let message;
         try { message = JSON.parse(data.toString()); } catch { return; }
-        if (!message || message.t !== 'hello' || message.version !== 1) return;
-        ws.authenticating = true;
-        clearTimeout(helloTimer);
-        const identity = message.authToken
-          ? verifyIframeToken(message.authToken, {
-            serviceId: SERVICE_ID,
-            verifyUrl: USION_VERIFY_URL,
-          })
-          : Promise.resolve({ name: message.name, session: message.session });
-        identity.then(({ name, session }) => {
-          if (ws.readyState !== ws.OPEN) return;
-          const result = world.join({ name, session, ws });
-          if (!result) {
-            sendJson(ws, { t: 'error', reason: 'World is full. Try again shortly.' });
-            ws.close(4001, 'world full');
+        if (message?.t !== 'hello' || message.version !== 2) return;
+        ws.joining = true;
+        try {
+          const identity = await authenticate();
+          if (!identity || ws.readyState !== ws.OPEN) throw new Error('invalid identity');
+          const joined = rooms.join(identity, String(message.name || ''), ws, now);
+          if (!joined) {
+            sendJson(ws, { t: 'error', reason: 'MATCH_UNAVAILABLE' });
+            ws.close(4001, 'match unavailable');
             return;
           }
-          clearTimeout(helloTimer);
-          ws.player = result.player;
-          sendJson(ws, {
-            t: 'welcome', id: result.player.id, session: result.player.session,
-            tickRate: TICK_RATE, snapshotRate: SNAPSHOT_RATE, maxPlayers: MAX_PLAYERS,
-            players: world.roster(), world: world.worldInfo(), reconnected: result.reconnected,
-          });
-          broadcast({
-            t: result.reconnected ? 'rejoin' : 'join',
-            id: result.player.id, name: result.player.name,
-          });
-          world.syncInterest(result.player);
-        }).catch(() => {
-          sendJson(ws, { t: 'error', reason: 'Usion identity could not be verified.' });
-          ws.close(4002, 'invalid identity');
-        });
+          clearTimeout(timer);
+          ws.seat = joined.seat;
+          ws.room = joined.room;
+          sendJson(ws, joined.room.welcome(joined.seat, joined.reconnected));
+        } catch {
+          sendJson(ws, { t: 'error', reason: 'USION_ACCESS_REJECTED' });
+          ws.close(4002, 'invalid access');
+        }
         return;
       }
       if (!isBinary) return;
@@ -106,33 +123,30 @@ export function attachRealtime(server, world) {
       const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
       if (buffer.byteLength === INPUT_BYTES && view.getUint8(0) === MSG.INPUT) {
         const input = decodeInput(view);
-        if (input) world.setInput(ws.player, input);
+        if (input) ws.room.setInput(ws.seat, input, now);
       } else if (buffer.byteLength === 9 && view.getUint8(0) === MSG.PING) {
         ws.send(encodePong(view.getFloat64(1, true)));
       }
     });
-
     ws.on('close', () => {
-      clearTimeout(helloTimer);
-      if (ws.player) world.disconnect(ws.player);
+      clearTimeout(timer);
+      if (ws.room && ws.seat?.ws === ws) ws.room.disconnect(ws.seat);
     });
     ws.on('error', () => {});
   });
 
   const snapshotEvery = Math.max(1, Math.round(TICK_RATE / SNAPSHOT_RATE));
   const snapshotTimer = setInterval(() => {
-    if (world.tickNumber % snapshotEvery) return;
-    const players = world.connectedPlayers();
-    for (const recipient of players) {
-      if (recipient.ws.readyState !== recipient.ws.OPEN
-        || recipient.ws.bufferedAmount >= MAX_BUFFERED_BYTES) continue;
-      recipient.ws.send(encodeSnapshot(
-        world.tickNumber,
-        recipient.lastAck,
-        world.visiblePlayers(recipient),
-      ));
+    for (const room of rooms.rooms.values()) {
+      if (room.tickNumber % snapshotEvery) continue;
+      const players = room.snapshotPlayers();
+      for (const recipient of room.match.connectedSeats()) {
+        const ws = recipient.ws;
+        if (ws?.readyState !== ws.OPEN || ws.bufferedAmount >= MAX_BUFFERED_BYTES) continue;
+        ws.send(encodeSnapshot(room.tickNumber, recipient.lastAck, players));
+      }
     }
-  }, 1000 / TICK_RATE);
+  }, 1_000 / TICK_RATE);
 
   const livenessTimer = setInterval(() => {
     for (const ws of wss.clients) {
@@ -143,7 +157,7 @@ export function attachRealtime(server, world) {
       ws.isAlive = false;
       ws.ping();
     }
-  }, 10000);
+  }, 10_000);
 
   return {
     wss,

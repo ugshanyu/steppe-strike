@@ -1,3 +1,4 @@
+import { RIFLE } from '../shared/combat.js';
 import { BUTTON } from '../shared/constants.js';
 
 const KEY_BITS = {
@@ -10,18 +11,20 @@ const KEY_BITS = {
   KeyD: BUTTON.RIGHT,
   ArrowRight: BUTTON.RIGHT,
   Space: BUTTON.JUMP,
+  KeyR: BUTTON.RELOAD,
 };
 
 export class InputController {
-  constructor(canvas, onSlotChange = () => {}) {
+  constructor(canvas) {
     this.canvas = canvas;
-    this.onSlotChange = onSlotChange;
     this.keys = 0;
     this.touchMove = 0;
     this.actions = 0;
+    this.pressed = 0;
     this.yaw = 0;
     this.pitch = 0;
-    this.slot = 0;
+    this.fireNonce = 0;
+    this.nextFireAt = 0;
     this.lookPointer = null;
     this.lookLast = { x: 0, y: 0 };
     this.touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
@@ -33,15 +36,11 @@ export class InputController {
 
   bindKeyboard() {
     addEventListener('keydown', (event) => {
-      if (/^Digit[1-6]$/.test(event.code)) {
-        this.selectSlot(Number(event.code.slice(-1)) - 1);
-        return;
-      }
       const bit = KEY_BITS[event.code];
-      if (bit) {
-        event.preventDefault();
-        this.keys |= bit;
-      }
+      if (!bit) return;
+      event.preventDefault();
+      this.keys |= bit;
+      this.pressed |= bit;
     });
     addEventListener('keyup', (event) => {
       const bit = KEY_BITS[event.code];
@@ -50,6 +49,7 @@ export class InputController {
     addEventListener('blur', () => {
       this.keys = 0;
       this.actions = 0;
+      this.pressed = 0;
     });
   }
 
@@ -64,12 +64,16 @@ export class InputController {
     this.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     this.canvas.addEventListener('click', () => this.requestPointerLock());
     addEventListener('mousemove', (event) => {
-      if (document.pointerLockElement === this.canvas) this.look(event.movementX, event.movementY, 0.0022);
+      if (document.pointerLockElement === this.canvas) {
+        this.look(event.movementX, event.movementY, 0.0022);
+      }
     });
     this.canvas.addEventListener('pointerdown', (event) => {
       if (this.touch) return;
-      if (event.button === 0) this.actions |= BUTTON.MINE;
-      if (event.button === 2) this.actions |= BUTTON.PLACE;
+      if (event.button === 0) {
+        this.actions |= BUTTON.FIRE;
+        this.pressed |= BUTTON.FIRE;
+      }
       if (document.pointerLockElement !== this.canvas && event.button === 0) {
         this.lookPointer = event.pointerId;
         this.lookLast = { x: event.clientX, y: event.clientY };
@@ -82,21 +86,17 @@ export class InputController {
       this.lookLast = { x: event.clientX, y: event.clientY };
     });
     const release = (event) => {
-      if (event.button === 0) this.actions &= ~BUTTON.MINE;
-      if (event.button === 2) this.actions &= ~BUTTON.PLACE;
+      if (event.button === 0) this.actions &= ~BUTTON.FIRE;
       if (event.pointerId === this.lookPointer) this.lookPointer = null;
     };
     this.canvas.addEventListener('pointerup', release);
     this.canvas.addEventListener('pointercancel', release);
-    addEventListener('wheel', (event) => {
-      this.selectSlot((this.slot + Math.sign(event.deltaY) + 6) % 6);
-    }, { passive: true });
   }
 
   bindTouch() {
     this.bindJoystick();
-    this.bindHold(document.querySelector('#mine-button'), BUTTON.MINE);
-    this.bindHold(document.querySelector('#place-button'), BUTTON.PLACE);
+    this.bindHold(document.querySelector('#fire-button'), BUTTON.FIRE);
+    this.bindHold(document.querySelector('#reload-button'), BUTTON.RELOAD);
     this.bindHold(document.querySelector('#jump-button'), BUTTON.JUMP);
     this.canvas.addEventListener('pointerdown', (event) => {
       if (!this.touch || event.clientX < innerWidth * 0.34 || this.lookPointer !== null) return;
@@ -150,10 +150,12 @@ export class InputController {
   }
 
   bindHold(element, bit) {
+    if (!element) return;
     element.addEventListener('pointerdown', (event) => {
       event.preventDefault();
       if (bit === BUTTON.JUMP) this.keys |= bit;
       else this.actions |= bit;
+      this.pressed |= bit;
       element.classList.add('active');
       element.setPointerCapture(event.pointerId);
     });
@@ -166,11 +168,6 @@ export class InputController {
     element.addEventListener('pointercancel', stop);
   }
 
-  selectSlot(slot) {
-    this.slot = Math.max(0, Math.min(5, slot));
-    this.onSlotChange(this.slot);
-  }
-
   look(dx, dy, sensitivity) {
     this.yaw -= dx * sensitivity;
     this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch - dy * sensitivity));
@@ -178,13 +175,18 @@ export class InputController {
     if (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
   }
 
-  read() {
-    return {
-      buttons: this.keys | this.touchMove | this.actions,
-      yaw: this.yaw,
-      pitch: this.pitch,
-      slot: this.slot,
-    };
+  read(now = performance.now()) {
+    const buttons = this.keys | this.touchMove | this.actions | this.pressed;
+    this.pressed = 0;
+    if (buttons & BUTTON.FIRE) {
+      if (now >= this.nextFireAt) {
+        this.fireNonce = (this.fireNonce + 1) & 0xffff;
+        this.nextFireAt = now + RIFLE.fireIntervalMs;
+      }
+    } else {
+      this.nextFireAt = 0;
+    }
+    return { buttons, yaw: this.yaw, pitch: this.pitch, fireNonce: this.fireNonce };
   }
 
   setLook(yaw, pitch = 0) {

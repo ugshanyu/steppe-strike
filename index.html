@@ -4,65 +4,75 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
     <meta name="theme-color" content="#172319">
-    <meta name="description" content="Steppe World — Монголын тал нутгаас сэдэвлэсэн нэг нийтийн блок ертөнц.">
-    <title>Steppe World</title>
+    <meta name="description" content="Steppe Strike — Монголд зориулсан бодит цагийн 5v5 блок тулаан.">
+    <title>Steppe Strike</title>
     <link rel="stylesheet" href="/client/styles.css">
     <link rel="stylesheet" href="/client/mobile.css">
     <script defer src="https://usions.com/sdk/v2/2.27.0/usion-sdk.js"></script>
   </head>
   <body>
     <main id="game">
-      <canvas id="game-canvas" aria-label="Steppe World shared block world"></canvas>
+      <canvas id="game-canvas" aria-label="Steppe Strike real-time block arena"></canvas>
 
       <section id="join-screen" class="join-screen">
         <div class="join-card">
           <div class="brand-blocks" aria-hidden="true"><i></i><i></i><i></i></div>
-          <p class="eyebrow">MONGOLIA · ONE PERSISTENT WORLD</p>
-          <h1>STEPPE<br><span>WORLD</span></h1>
-          <p class="tagline">Уудам талын блок ертөнцийг судал.<br>Ухаж, барьж, хамтдаа өөрчил.</p>
+          <p class="eyebrow">MONGOLIA · REAL-TIME 5V5</p>
+          <h1>STEPPE<br><span>STRIKE</span></h1>
+          <p class="tagline">Блок ертөнц. Хоёр баг. Нэг ялагч.<br>Хурдан хөдөлж, оновчтой буудаж, үе бүрийг ав.</p>
           <form id="join-form">
             <label for="player-name">Таны нэр</label>
             <div class="name-row">
               <input id="player-name" maxlength="18" autocomplete="nickname" spellcheck="false">
-              <button type="submit">ЕРТӨНЦӨД ОРОХ <b>→</b></button>
+              <button type="submit">ТУЛААНД ОРОХ <b>→</b></button>
             </div>
           </form>
           <div class="control-hints">
             <span><kbd>WASD</kbd> ХӨДЛӨХ</span>
-            <span><kbd>LEFT CLICK</kbd> УХАХ</span>
-            <span><kbd>RIGHT CLICK</kbd> БАРИХ</span>
-            <span><kbd>1–6</kbd> БЛОК СОНГОХ</span>
+            <span><kbd>LEFT CLICK</kbd> БУУДАХ</span>
+            <span><kbd>R</kbd> ЦЭНЭГЛЭХ</span>
+            <span><kbd>SPACE</kbd> ҮСРЭХ</span>
             <span class="phone-hint">УТАСНЫ УДИРДЛАГА БЭЛЭН</span>
           </div>
-          <p id="join-status" class="join-status">Ертөнц бэлэн · Singapore edge</p>
+          <p id="join-status" class="join-status">Usion өрөөтэй холбож байна…</p>
         </div>
-        <p class="version">CREATIVE WORLD ALPHA</p>
+        <p class="version">COMPETITIVE FOUNDATION · PROTOCOL 2</p>
       </section>
 
       <section id="hud" class="hud hidden" aria-live="polite">
         <div class="top-left">
-          <div class="mini-logo">SW</div>
+          <div class="mini-logo">SS</div>
           <div>
-            <strong>STEPPE WORLD</strong>
+            <strong>STEPPE STRIKE</strong>
             <span id="connection-status"><i></i> ХОЛБОГДСОН</span>
           </div>
         </div>
-        <div id="population" class="population">1 / 96</div>
-        <div id="target-block" class="target-block"></div>
-        <div id="mining-progress" class="mining-progress"><i></i></div>
+        <div id="match-score" class="match-score">
+          <b id="attack-score">0</b>
+          <span id="round-state">ТОГЛОГЧ ХҮЛЭЭЖ БАЙНА</span>
+          <b id="defend-score">0</b>
+        </div>
+        <div id="population" class="population">0 / 10</div>
         <div class="crosshair"><i></i><i></i></div>
+        <div id="damage-vignette" class="damage-vignette"></div>
         <div id="announcement" class="announcement hidden"></div>
-        <div class="hotbar-wrap">
-          <span id="held-block">Өвс</span>
-          <div id="hotbar" class="hotbar" aria-label="Блок сонгох"></div>
+        <div id="spectator-state" class="spectator-state hidden"></div>
+        <div id="kill-feed" class="kill-feed"></div>
+        <div class="vitals">
+          <small>АМЬ</small>
+          <b id="health">100</b>
+        </div>
+        <div class="weapon-state">
+          <small id="reload-state">SERVICE RIFLE</small>
+          <b id="ammo">30</b><span>/ <i id="reserve-ammo">90</i></span>
         </div>
         <div id="latency" class="latency">— MS</div>
       </section>
 
       <section id="mobile-controls" class="mobile-controls hidden" aria-label="Touch controls">
         <div id="joystick" class="joystick"><i id="joystick-knob"></i></div>
-        <button id="mine-button" class="action-button mine-button" aria-label="Ухах">УХАХ</button>
-        <button id="place-button" class="action-button place-button" aria-label="Барих">БАРИХ</button>
+        <button id="fire-button" class="action-button fire-button" aria-label="Буудах">ГАЛ</button>
+        <button id="reload-button" class="action-button reload-button" aria-label="Цэнэглэх">R</button>
         <button id="jump-button" class="round-button jump-button" aria-label="Үсрэх">↑</button>
       </section>
     </main>

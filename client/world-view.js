@@ -1,28 +1,35 @@
 import * as THREE from 'three';
-import { blockDef, HOTBAR_BLOCKS } from '../shared/blocks.js';
-import { EYE_HEIGHT } from '../shared/constants.js';
+import { EYE_HEIGHT, PLAYER_FLAG } from '../shared/constants.js';
 import { CHUNK_SIZE, chunkKey, floorDiv, localCoord } from '../shared/terrain.js';
-import { lookDirection, voxelRaycast } from '../shared/voxel-ray.js';
 import { createChunkGroup, disposeChunk } from './chunk-mesh.js';
 import { PlayerAvatar } from './player-avatar.js';
 
-function createHeldBlock(camera) {
+function createRifle(camera) {
   const group = new THREE.Group();
   const hand = new THREE.Mesh(
     new THREE.BoxGeometry(0.14, 0.18, 0.3),
     new THREE.MeshLambertMaterial({ color: 0xd2a77d }),
   );
-  const block = new THREE.Mesh(
-    new THREE.BoxGeometry(0.24, 0.24, 0.24),
-    new THREE.MeshLambertMaterial({ color: blockDef(HOTBAR_BLOCKS[0]).color }),
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.13, 0.14, 0.75),
+    new THREE.MeshLambertMaterial({ color: 0x252b28 }),
   );
-  hand.position.set(0.12, -0.1, 0.13);
-  block.position.set(0, 0.04, -0.03);
-  group.add(hand, block);
-  group.position.set(0.48, -0.42, -0.82);
+  const stock = new THREE.Mesh(
+    new THREE.BoxGeometry(0.17, 0.19, 0.28),
+    new THREE.MeshLambertMaterial({ color: 0x67482d }),
+  );
+  const magazine = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.26, 0.17),
+    new THREE.MeshLambertMaterial({ color: 0x343a36 }),
+  );
+  hand.position.set(0.1, -0.12, 0.1);
+  stock.position.z = 0.4;
+  magazine.position.set(0, -0.16, -0.04);
+  group.add(hand, body, stock, magazine);
+  group.position.set(0.48, -0.39, -0.82);
   group.rotation.set(-0.12, -0.18, 0.05);
   camera.add(group);
-  return { group, block };
+  return group;
 }
 
 export class WorldView {
@@ -58,25 +65,12 @@ export class WorldView {
     this.chunkQueue = [];
     this.queued = new Set();
     this.players = new Map();
-    this.target = null;
-    this.slot = 0;
-    this.held = createHeldBlock(this.camera);
-    this.selection = this.createSelection();
+    this.localId = 0;
+    this.recoil = 0;
+    this.rifle = createRifle(this.camera);
     this.addLights();
     this.resize();
     addEventListener('resize', () => this.resize());
-  }
-
-  createSelection() {
-    const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.012, 1.012, 1.012));
-    const outline = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({ color: 0xf3f7df, depthTest: false }),
-    );
-    outline.renderOrder = 4;
-    outline.visible = false;
-    this.scene.add(outline);
-    return outline;
   }
 
   addLights() {
@@ -92,6 +86,10 @@ export class WorldView {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    const portrait = this.camera.aspect < 0.7;
+    this.rifleBaseZ = portrait ? -0.7 : -0.82;
+    this.rifle.position.set(portrait ? 0.25 : 0.48, portrait ? -0.34 : -0.39, this.rifleBaseZ);
+    this.rifle.scale.setScalar(portrait ? 0.78 : 1);
   }
 
   setWorld(world) {
@@ -177,14 +175,15 @@ export class WorldView {
     }
   }
 
-  syncPlayers(states, names, localId) {
+  syncPlayers(states, names, localId, spectatedId = null) {
+    this.localId = localId;
     const seen = new Set();
     for (const state of states) {
-      if (state.id === localId) continue;
+      if (state.id === localId || state.id === spectatedId) continue;
       seen.add(state.id);
       let avatar = this.players.get(state.id);
       if (!avatar) {
-        avatar = new PlayerAvatar(names.get(state.id)?.name || `Player ${state.id}`, state.id);
+        avatar = new PlayerAvatar(names.get(state.id)?.name || `Player ${state.id}`);
         this.players.set(state.id, avatar);
         this.scene.add(avatar.group);
       }
@@ -198,37 +197,29 @@ export class WorldView {
     }
   }
 
-  setSlot(slot) {
-    this.slot = slot;
-    this.held.block.material.color.setHex(blockDef(HOTBAR_BLOCKS[slot]).color);
+  fire(playerId) {
+    if (playerId === this.localId) this.recoil = 1;
+    else this.players.get(playerId)?.fire();
   }
 
-  render(local, dt) {
+  render(local, dt, spectator = null) {
     const alpha = 1 - Math.exp(-dt * 13);
     for (const avatar of this.players.values()) {
       if (avatar.target) avatar.update(avatar.target, alpha);
     }
-    if (local) {
-      this.camera.position.set(local.x, local.y + EYE_HEIGHT, local.z);
-      this.camera.rotation.set(local.pitch, local.yaw, 0);
-      this.updateChunks(local);
-      const speed = Math.hypot(local.vx, local.vz);
+    const cameraState = spectator || local;
+    if (cameraState) {
+      this.camera.position.set(cameraState.x, cameraState.y + EYE_HEIGHT, cameraState.z);
+      this.camera.rotation.set(cameraState.pitch, cameraState.yaw, 0);
+      this.updateChunks(cameraState);
+      const speed = Math.hypot(cameraState.vx, cameraState.vz);
       this.camera.position.y += Math.sin(performance.now() * 0.012) * Math.min(0.025, speed * 0.004);
-      this.target = this.world
-        ? voxelRaycast(this.world, this.camera.position,
-          lookDirection(local.yaw, local.pitch), 5.5)
-        : null;
-      this.selection.visible = Boolean(this.target);
-      if (this.target) {
-        this.selection.position.set(
-          this.target.block.x + 0.5,
-          this.target.block.y + 0.5,
-          this.target.block.z + 0.5,
-        );
-      }
+      this.rifle.visible = !spectator && Boolean(local?.flags & PLAYER_FLAG.ALIVE);
+      this.rifle.position.z = this.rifleBaseZ + this.recoil * 0.11;
+      this.rifle.rotation.x = -0.12 + this.recoil * 0.08;
+      this.recoil *= 0.7;
     }
     this.buildQueued();
     this.renderer.render(this.scene, this.camera);
-    return this.target;
   }
 }

@@ -3,8 +3,8 @@ import { MSG } from './constants.js';
 const ANGLE_SCALE = 10430;
 const POS_SCALE = 100;
 const VEL_SCALE = 100;
-export const INPUT_BYTES = 10;
-export const PLAYER_BYTES = 28;
+export const INPUT_BYTES = 14;
+export const PLAYER_BYTES = 32;
 
 const clamp = (number, min, max) => Math.max(min, Math.min(max, number));
 const wrapAngle = (value) => {
@@ -14,7 +14,7 @@ const wrapAngle = (value) => {
   return angle;
 };
 
-export function encodeInput(seq, buttons, yaw, pitch, slot = 0) {
+export function encodeInput(seq, buttons, yaw, pitch, fireNonce = 0, viewTick = 0) {
   const buffer = new ArrayBuffer(INPUT_BYTES);
   const view = new DataView(buffer);
   view.setUint8(0, MSG.INPUT);
@@ -22,8 +22,8 @@ export function encodeInput(seq, buttons, yaw, pitch, slot = 0) {
   view.setUint8(3, buttons & 0x7f);
   view.setInt16(4, Math.round(wrapAngle(yaw) * ANGLE_SCALE), true);
   view.setInt16(6, Math.round(clamp(pitch, -1.45, 1.45) * ANGLE_SCALE), true);
-  view.setUint8(8, clamp(Math.floor(slot), 0, 5));
-  view.setUint8(9, 0);
+  view.setUint16(8, fireNonce & 0xffff, true);
+  view.setUint32(10, viewTick >>> 0, true);
   return buffer;
 }
 
@@ -34,7 +34,8 @@ export function decodeInput(view) {
     buttons: view.getUint8(3) & 0x7f,
     yaw: wrapAngle(view.getInt16(4, true) / ANGLE_SCALE),
     pitch: clamp(view.getInt16(6, true) / ANGLE_SCALE, -1.45, 1.45),
-    slot: clamp(view.getUint8(8), 0, 5),
+    fireNonce: view.getUint16(8, true),
+    viewTick: view.getUint32(10, true),
   };
 }
 
@@ -72,10 +73,14 @@ export function encodeSnapshot(tick, ack, players) {
     view.setInt16(offset + 18, clamp(Math.round(player.vz * VEL_SCALE), -32767, 32767), true);
     view.setInt16(offset + 20, Math.round(wrapAngle(player.yaw) * ANGLE_SCALE), true);
     view.setInt16(offset + 22, Math.round(clamp(player.pitch, -1.45, 1.45) * ANGLE_SCALE), true);
-    view.setUint8(offset + 24, clamp(player.slot || 0, 0, 5));
-    view.setUint8(offset + 25, player.mining ? 1 : 0);
-    view.setUint8(offset + 26, clamp(Math.round((player.mineProgress || 0) * 255), 0, 255));
-    view.setUint8(offset + 27, 0);
+    view.setUint8(offset + 24, clamp(player.team || 0, 0, 2));
+    view.setUint8(offset + 25, clamp(player.health ?? 100, 0, 100));
+    view.setUint8(offset + 26, clamp(player.armor || 0, 0, 100));
+    view.setUint8(offset + 27, clamp(player.ammo || 0, 0, 255));
+    view.setUint8(offset + 28, player.flags || 0);
+    view.setUint8(offset + 29, clamp(player.kills || 0, 0, 255));
+    view.setUint8(offset + 30, clamp(player.deaths || 0, 0, 255));
+    view.setUint8(offset + 31, clamp(player.reserveAmmo || 0, 0, 255));
     offset += PLAYER_BYTES;
   }
   return buffer;
@@ -97,9 +102,14 @@ export function decodeSnapshot(view) {
       vz: view.getInt16(offset + 18, true) / VEL_SCALE,
       yaw: wrapAngle(view.getInt16(offset + 20, true) / ANGLE_SCALE),
       pitch: view.getInt16(offset + 22, true) / ANGLE_SCALE,
-      slot: view.getUint8(offset + 24),
-      mining: Boolean(view.getUint8(offset + 25) & 1),
-      mineProgress: view.getUint8(offset + 26) / 255,
+      team: view.getUint8(offset + 24),
+      health: view.getUint8(offset + 25),
+      armor: view.getUint8(offset + 26),
+      ammo: view.getUint8(offset + 27),
+      flags: view.getUint8(offset + 28),
+      kills: view.getUint8(offset + 29),
+      deaths: view.getUint8(offset + 30),
+      reserveAmmo: view.getUint8(offset + 31),
     });
   }
   return {

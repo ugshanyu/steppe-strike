@@ -3,7 +3,9 @@
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   background: #172319;
   font-synthesis: none;
-  --lime: #d8ff65;
+  --lime: #ffcd57;
+  --attack: #df953e;
+  --defend: #5ba2da;
   --panel: rgba(10, 17, 12, .76);
   --line: rgba(231, 242, 218, .24);
 }
@@ -20,7 +22,7 @@ button { -webkit-tap-highlight-color: transparent; }
   position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
   background:
     linear-gradient(90deg, rgba(9, 16, 11, .98), rgba(9, 16, 11, .74) 54%, rgba(9, 16, 11, .28)),
-    linear-gradient(145deg, #1b2a1d 0 42%, #55714d 42% 45%, #89b967 45% 52%, #89c7d1 52%);
+    linear-gradient(145deg, #171d18 0 42%, #5e5138 42% 45%, #9e783d 45% 52%, #7897a5 52%);
 }
 .join-screen::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .13;
@@ -74,40 +76,60 @@ kbd { padding: 3px 6px; border: 1px solid #667263; border-radius: 3px; color: #e
 }
 .population { right: 22px; top: 24px; }
 .latency { right: 22px; bottom: 22px; }
+.match-score {
+  position: absolute; left: 50%; top: 20px; display: grid;
+  grid-template-columns: 42px minmax(140px, auto) 42px; align-items: stretch;
+  transform: translateX(-50%); background: var(--panel); backdrop-filter: blur(8px);
+}
+.match-score b { display: grid; place-items: center; min-height: 40px; font-size: 19px; }
+.match-score b:first-child { color: #1c160d; background: var(--attack); }
+.match-score b:last-child { color: #0a1823; background: var(--defend); }
+.match-score span {
+  display: grid; place-items: center; padding: 0 18px;
+  color: #e5e9df; font-size: 10px; font-weight: 850; letter-spacing: .12em;
+}
 .crosshair { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); }
 .crosshair i { position: absolute; background: #fff; box-shadow: 0 0 2px #000; }
 .crosshair i:first-child { left: 3px; top: 9px; width: 14px; height: 2px; }
 .crosshair i:last-child { left: 9px; top: 3px; width: 2px; height: 14px; }
-.target-block {
-  position: absolute; left: 50%; top: calc(50% + 24px); opacity: 0;
-  transform: translateX(-50%); padding: 4px 8px; color: #f6f8ee; background: var(--panel);
-  font-size: 10px; letter-spacing: .08em; transition: opacity .1s;
+.crosshair.hit i { background: #ff5f4c; transform: rotate(45deg); }
+.damage-vignette {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  box-shadow: inset 0 0 120px 35px rgba(191, 27, 15, .82); transition: opacity .2s;
 }
-.target-block.visible { opacity: 1; }
-.mining-progress {
-  position: absolute; left: 50%; top: calc(50% + 49px); width: 112px; height: 4px;
-  opacity: 0; transform: translateX(-50%); background: rgba(0,0,0,.45);
-}
-.mining-progress.visible { opacity: 1; }
-.mining-progress i { display: block; width: 0; height: 100%; background: var(--lime); }
+.damage-vignette.active { opacity: 1; transition-duration: .03s; }
 .announcement {
   position: absolute; left: 50%; top: 24%; transform: translate(-50%, -50%);
   padding: 11px 18px; border: 1px solid var(--line); color: #fff; background: var(--panel);
   font-size: 16px; letter-spacing: .08em; backdrop-filter: blur(8px);
 }
-.hotbar-wrap { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); text-align: center; pointer-events: auto; }
-.hotbar-wrap > span {
-  display: inline-block; margin-bottom: 7px; padding: 4px 8px; color: #e7ecdf;
-  background: var(--panel); font-size: 10px; letter-spacing: .08em;
+.spectator-state {
+  position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%);
+  padding: 7px 11px; border-top: 2px solid var(--defend); color: #dce7ec;
+  background: var(--panel); font-size: 10px; font-weight: 800; letter-spacing: .12em;
 }
-.hotbar { display: flex; gap: 4px; padding: 5px; background: rgba(8, 14, 9, .76); border: 1px solid var(--line); }
-.hotbar button {
-  position: relative; display: grid; place-items: center; width: 48px; height: 48px;
-  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.04); cursor: pointer;
+.vitals, .weapon-state {
+  position: absolute; bottom: 22px; min-width: 122px; padding: 10px 14px;
+  border-left: 3px solid var(--lime); background: var(--panel); backdrop-filter: blur(8px);
 }
-.hotbar button.selected { border: 2px solid var(--lime); background: rgba(216,255,101,.1); transform: translateY(-3px); }
-.hotbar button i { width: 26px; height: 26px; box-shadow: inset -5px -5px rgba(0,0,0,.18); }
-.hotbar button small { position: absolute; left: 4px; top: 2px; color: #dce3d5; font-size: 9px; }
+.vitals { left: 22px; }
+.weapon-state { right: 92px; text-align: right; }
+.vitals small, .weapon-state small {
+  display: block; color: #a8b1a4; font-size: 9px; font-weight: 800; letter-spacing: .15em;
+}
+.vitals b, .weapon-state b { font-size: 28px; line-height: 1; }
+.weapon-state span { margin-left: 5px; color: #929b91; font-size: 12px; }
+.weapon-state i { font-style: normal; }
+.kill-feed { position: absolute; right: 22px; top: 74px; display: grid; gap: 5px; }
+.kill-feed div {
+  display: flex; gap: 8px; justify-content: flex-end; padding: 6px 9px;
+  background: var(--panel); font-size: 11px; animation: kill-in .15s ease-out;
+}
+.kill-feed b { color: var(--lime); }
+.kill-feed span { color: #d6d8cf; }
+.kill-feed em { color: #b9c0b5; font-style: normal; }
+.spectating .weapon-state { opacity: .5; }
+@keyframes kill-in { from { opacity: 0; transform: translateX(20px); } }
 
 .mobile-controls { position: fixed; inset: 0; z-index: 8; pointer-events: none; }
 .joystick {
@@ -125,8 +147,11 @@ kbd { padding: 3px 6px; border: 1px solid #667263; border-radius: 3px; color: #e
 }
 .action-button { width: 76px; height: 62px; border-radius: 14px; font-size: 11px; }
 .action-button.active, .round-button.active { transform: scale(.92); background: rgba(216,255,101,.28); }
-.mine-button { right: max(24px, env(safe-area-inset-right)); bottom: max(38px, env(safe-area-inset-bottom)); }
-.place-button { right: max(106px, calc(env(safe-area-inset-right) + 106px)); bottom: max(38px, env(safe-area-inset-bottom)); }
+.fire-button {
+  right: max(24px, env(safe-area-inset-right)); bottom: max(38px, env(safe-area-inset-bottom));
+  color: #1a1308; border-color: #ffde7d; background: rgba(255, 184, 56, .78);
+}
+.reload-button { right: max(106px, calc(env(safe-area-inset-right) + 106px)); bottom: max(38px, env(safe-area-inset-bottom)); }
 .round-button { width: 54px; height: 54px; border-radius: 50%; }
 .jump-button { right: max(26px, env(safe-area-inset-right)); bottom: max(108px, calc(env(safe-area-inset-bottom) + 108px)); }
 

@@ -1,4 +1,4 @@
-import { blockDef, HOTBAR_BLOCKS } from '../shared/blocks.js';
+import { PLAYER_FLAG } from '../shared/constants.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -9,33 +9,7 @@ export class GameUI {
     this.mobile = $('#mobile-controls');
     this.connection = $('#connection-status');
     this.announcementTimer = null;
-    this.hotbar = $('#hotbar');
-    this.buildHotbar();
-  }
-
-  buildHotbar() {
-    this.hotbar.replaceChildren();
-    HOTBAR_BLOCKS.forEach((id, slot) => {
-      const block = blockDef(id);
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.dataset.slot = String(slot);
-      button.setAttribute('aria-label', block.mn);
-      const swatch = document.createElement('i');
-      swatch.style.background = `#${block.color.toString(16).padStart(6, '0')}`;
-      const key = document.createElement('small');
-      key.textContent = String(slot + 1);
-      button.append(swatch, key);
-      this.hotbar.append(button);
-    });
-    this.setSlot(0);
-  }
-
-  bindHotbar(handler) {
-    this.hotbar.addEventListener('pointerdown', (event) => {
-      const button = event.target.closest('button[data-slot]');
-      if (button) handler(Number(button.dataset.slot));
-    });
+    this.feedbackTimer = null;
   }
 
   enterGame(touch) {
@@ -49,30 +23,41 @@ export class GameUI {
       connecting: 'ХОЛБОЖ БАЙНА',
       connected: 'ХОЛБОГДСОН',
       reconnecting: 'ДАХИН ХОЛБОЖ БАЙНА',
-      full: 'ЕРТӨНЦ ДҮҮРСЭН',
+      full: 'ТОГЛОЛТ ДҮҮРСЭН',
     };
     this.connection.lastChild.textContent = ` ${labels[status] || status}`;
     this.connection.querySelector('i').style.background =
       status === 'connected' ? '#75eb72' : status === 'full' ? '#ff6b4a' : '#ffc84a';
   }
 
-  setSlot(slot) {
-    for (const button of this.hotbar.querySelectorAll('button')) {
-      button.classList.toggle('selected', Number(button.dataset.slot) === slot);
-    }
-    $('#held-block').textContent = blockDef(HOTBAR_BLOCKS[slot]).mn;
+  setMatch(match = {}) {
+    $('#attack-score').textContent = match.scores?.attackers ?? 0;
+    $('#defend-score').textContent = match.scores?.defenders ?? 0;
+    const labels = {
+      warmup: 'ТОГЛОГЧ ХҮЛЭЭЖ БАЙНА',
+      live: `ҮЕ ${match.round || 1}`,
+      round_end: 'ҮЕ ДУУСЛАА',
+      match_end: 'ТОГЛОЛТ ДУУСЛАА',
+    };
+    $('#round-state').textContent = labels[match.phase] || 'БЭЛЭН';
   }
 
-  setTarget(hit, progress = 0) {
-    const target = $('#target-block');
-    const mining = $('#mining-progress');
-    target.textContent = hit ? blockDef(hit.block.id).mn : '';
-    target.classList.toggle('visible', Boolean(hit));
-    mining.classList.toggle('visible', progress > 0 && Boolean(hit));
-    mining.firstElementChild.style.width = `${Math.round(progress * 100)}%`;
+  setVitals(player) {
+    $('#health').textContent = player.health;
+    $('#ammo').textContent = player.ammo;
+    $('#reserve-ammo').textContent = player.reserveAmmo;
+    $('#reload-state').textContent =
+      player.flags & PLAYER_FLAG.RELOADING ? 'ЦЭНЭГЛЭЖ БАЙНА' : 'SERVICE RIFLE';
+    document.body.classList.toggle('spectating', !(player.flags & PLAYER_FLAG.ALIVE));
   }
 
-  updatePopulation(count, capacity = 96) {
+  setSpectating(name) {
+    const label = $('#spectator-state');
+    label.textContent = name ? `${name} · АЖИГЛАЖ БАЙНА` : '';
+    label.classList.toggle('hidden', !name);
+  }
+
+  updatePopulation(count, capacity = 10) {
     $('#population').textContent = `${count} / ${capacity}`;
   }
 
@@ -80,7 +65,32 @@ export class GameUI {
     $('#latency').textContent = `${Math.round(ms)} MS`;
   }
 
-  announce(text, duration = 1800) {
+  shotFeedback(hit) {
+    const crosshair = $('.crosshair');
+    crosshair.classList.toggle('hit', hit);
+    clearTimeout(this.feedbackTimer);
+    this.feedbackTimer = setTimeout(() => crosshair.classList.remove('hit'), 120);
+  }
+
+  damageFeedback() {
+    const damage = $('#damage-vignette');
+    damage.classList.remove('active');
+    requestAnimationFrame(() => damage.classList.add('active'));
+    setTimeout(() => damage.classList.remove('active'), 220);
+  }
+
+  addKill(killer, victim, headshot) {
+    const row = document.createElement('div');
+    row.innerHTML = `<b></b><span>${headshot ? '◆' : '•'}</span><em></em>`;
+    row.querySelector('b').textContent = killer;
+    row.querySelector('em').textContent = victim;
+    const feed = $('#kill-feed');
+    feed.prepend(row);
+    while (feed.children.length > 4) feed.lastElementChild.remove();
+    setTimeout(() => row.remove(), 5_000);
+  }
+
+  announce(text, duration = 1_800) {
     const element = $('#announcement');
     element.textContent = text;
     element.classList.remove('hidden');

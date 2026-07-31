@@ -16,12 +16,14 @@
   .mini-logo { width: 34px; height: 34px; }
   .top-left strong { display: none; }
   .population { right: 10px; top: max(10px, env(safe-area-inset-top)); }
+  .match-score { top: max(58px, calc(env(safe-area-inset-top) + 48px)); }
+  .match-score { grid-template-columns: 35px minmax(112px, auto) 35px; }
+  .match-score span { padding: 0 9px; font-size: 8px; }
   .latency { right: 10px; bottom: calc(max(178px, env(safe-area-inset-bottom) + 155px)); }
   .announcement { top: 20%; width: max-content; max-width: 88vw; text-align: center; }
-  .hotbar-wrap { bottom: calc(max(172px, env(safe-area-inset-bottom) + 148px)); }
-  .hotbar { gap: 2px; padding: 4px; }
-  .hotbar button { width: min(13vw, 45px); height: min(13vw, 45px); }
-  .hotbar button i { width: 23px; height: 23px; }
+  .vitals { left: 10px; bottom: calc(max(178px, env(safe-area-inset-bottom) + 155px)); }
+  .weapon-state { right: 76px; bottom: calc(max(178px, env(safe-area-inset-bottom) + 155px)); }
+  .kill-feed { right: 10px; top: max(104px, calc(env(safe-area-inset-top) + 94px)); }
 }
 
 @media (pointer: fine) and (min-width: 761px) {
@@ -31,9 +33,9 @@
 @media (pointer: coarse) and (orientation: landscape) {
   .joystick { width: 108px; height: 108px; bottom: 20px; }
   .joystick i { left: 31px; top: 31px; width: 46px; height: 46px; }
-  .hotbar-wrap { bottom: 8px; }
-  .hotbar-wrap > span { display: none; }
-  .mine-button, .place-button { bottom: 22px; }
+  .fire-button, .reload-button { bottom: 22px; }
   .jump-button { bottom: 88px; }
   .latency { bottom: 90px; }
+  .vitals { bottom: 90px; }
+  .weapon-state { bottom: 90px; }
 }

@@ -1,29 +1,30 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import WebSocket from 'ws';
-import { BLOCK } from '../shared/blocks.js';
-import { BUTTON, MSG } from '../shared/constants.js';
+import { BUTTON, MSG, PLAYER_FLAG } from '../shared/constants.js';
 import { decodeSnapshot, encodeInput } from '../shared/protocol.js';
 
 const PORT = 8127;
-const URL = `ws://127.0.0.1:${PORT}/ws`;
+const BASE_URL = `ws://127.0.0.1:${PORT}/ws`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class Bot {
-  constructor(name, session) {
+  constructor(name, userId, roomId = 'smoke-room') {
     this.name = name;
-    this.session = session;
+    this.userId = userId;
+    this.roomId = roomId;
+    this.sessionId = `session-${userId}`;
     this.id = 0;
     this.seq = 0;
+    this.fireNonce = 0;
     this.events = [];
-    this.edits = new Map();
     this.snapshot = null;
+    this.closeCode = null;
+    this.closeReason = '';
   }
 
   async connect() {
-    this.ws = new WebSocket(URL);
+    const token = encodeURIComponent(`dev:${this.userId}:${this.sessionId}`);
+    this.ws = new WebSocket(`${BASE_URL}?room_id=${this.roomId}&token=${token}`);
     this.ws.binaryType = 'arraybuffer';
     this.ws.on('message', (data, isBinary) => {
       if (isBinary) {
@@ -35,22 +36,16 @@ class Bot {
       const message = JSON.parse(data.toString());
       this.events.push(message);
       if (message.t === 'welcome') this.id = message.id;
-      if (message.t === 'block') {
-        this.edits.set(`${message.x},${message.y},${message.z}`, message.id);
-      }
-      if (message.t === 'chunks') {
-        for (const chunk of message.chunks || []) {
-          for (const [x, y, z, id] of chunk.edits || []) this.edits.set(`${x},${y},${z}`, id);
-        }
-      }
+    });
+    this.ws.on('close', (code, reason) => {
+      this.closeCode = code;
+      this.closeReason = reason.toString();
     });
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${this.name} open timeout`)), 4000);
+      const timer = setTimeout(() => reject(new Error(`${this.name} open timeout`)), 4_000);
       this.ws.once('open', () => {
         clearTimeout(timer);
-        this.ws.send(JSON.stringify({
-          t: 'hello', version: 1, name: this.name, session: this.session, authToken: '',
-        }));
+        this.ws.send(JSON.stringify({ t: 'hello', version: 2, name: this.name }));
         resolve();
       });
       this.ws.once('error', reject);
@@ -62,44 +57,95 @@ class Bot {
     return this.snapshot?.players.find((player) => player.id === id);
   }
 
-  send(buttons, yaw = -Math.PI / 2, pitch = 0, slot = 0) {
+  send(buttons, yaw, pitch = 0, fire = false) {
     this.seq = (this.seq + 1) & 0xffff;
-    this.ws.send(encodeInput(this.seq, buttons, yaw, pitch, slot));
+    if (fire) this.fireNonce = (this.fireNonce + 1) & 0xffff;
+    this.ws.send(encodeInput(
+      this.seq,
+      buttons,
+      yaw,
+      pitch,
+      this.fireNonce,
+      this.snapshot?.tick || 0,
+    ));
   }
 
-  async stream(ticks, buttons, yaw = -Math.PI / 2, pitch = 0, slot = 0) {
-    for (let index = 0; index < ticks; index++) {
-      this.send(buttons, yaw, pitch, slot);
-      await sleep(34);
+  async stream(ticks, buttons, yaw, pitch = 0) {
+    for (let index = 0; index < ticks; index += 1) {
+      this.send(buttons, yaw, pitch);
+      await sleep(17);
     }
   }
 
-  async waitFor(predicate, label, timeout = 6000) {
+  fireAt(target) {
+    const shooter = this.state();
+    const victim = this.state(target.id);
+    const dx = victim.x - shooter.x;
+    const dz = victim.z - shooter.z;
+    const horizontal = Math.hypot(dx, dz);
+    const yaw = Math.atan2(-dx, -dz);
+    const pitch = Math.atan2((victim.y + 1) - (shooter.y + 1.62), horizontal);
+    this.send(BUTTON.FIRE, yaw, pitch, true);
+  }
+
+  async waitFor(predicate, label, timeout = 6_000) {
     const started = Date.now();
     while (!predicate()) {
-      if (Date.now() - started > timeout) throw new Error(`${this.name} ${label} timeout`);
-      await sleep(25);
+      if (Date.now() - started > timeout) {
+        throw new Error(`${this.name} ${label} timeout ${JSON.stringify({
+          state: this.state(),
+          events: this.events.slice(-6),
+        })}`);
+      }
+      await sleep(20);
     }
   }
 
-  close() {
-    this.ws?.close();
+  async close() {
+    if (!this.ws || this.ws.readyState >= WebSocket.CLOSING) return;
+    await new Promise((resolve) => {
+      this.ws.once('close', resolve);
+      this.ws.close();
+    });
   }
 }
 
-async function startServer(worldPath) {
+async function eliminate(attacker, victim) {
+  const previousKills = attacker.events.filter(
+    (event) => event.t === 'kill' && event.victim === victim.id,
+  ).length;
+  for (let shot = 0; shot < 4; shot += 1) {
+    await sleep(120);
+    attacker.fireAt(victim);
+    await attacker.waitFor(
+      () => attacker.events.filter(
+        (event) => event.t === 'kill' && event.victim === victim.id,
+      ).length > previousKills
+        || attacker.events.some(
+          (event) => event.t === 'shot' && event.nonce === attacker.fireNonce,
+        ),
+      'shot resolution',
+    );
+    if (attacker.events.filter(
+      (event) => event.t === 'kill' && event.victim === victim.id,
+    ).length > previousKills) return;
+  }
+  throw new Error(`${attacker.name} could not eliminate ${victim.name}`);
+}
+
+async function startServer() {
   const child = spawn(process.execPath, ['server/index.js'], {
     env: {
       ...process.env,
       PORT: String(PORT),
       TEST_MODE: '1',
       NODE_ENV: 'test',
-      WORLD_DATA_PATH: worldPath,
+      DEV_ALLOW_UNSIGNED: '1',
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server start timeout')), 5000);
+    const timer = setTimeout(() => reject(new Error('server start timeout')), 5_000);
     child.stdout.on('data', (chunk) => {
       if (chunk.toString().includes('server_started')) {
         clearTimeout(timer);
@@ -114,60 +160,88 @@ async function startServer(worldPath) {
 async function stopServer(child) {
   child.kill('SIGTERM');
   await new Promise((resolve) => child.once('exit', resolve));
-  await sleep(100);
 }
 
 async function main() {
-  const directory = await mkdtemp(join(tmpdir(), 'steppe-smoke-'));
-  const worldPath = join(directory, 'world.json');
-  let server = await startServer(worldPath);
+  const server = await startServer();
+  const alice = new Bot('Алтан', 'smoke-alice');
+  const bob = new Bot('Бөртэ', 'smoke-bob');
+  const isolated = new Bot('Тусдаа', 'smoke-isolated', 'another-room');
+  const flood = new Bot('Үер', 'smoke-flood', 'flood-room');
   try {
-    const alice = new Bot('Алтан', 'smoke-alice-0001');
-    const bob = new Bot('Бөртэ', 'smoke-bob-00002');
-    await alice.connect();
-    await bob.connect();
+    await Promise.all([alice.connect(), bob.connect(), isolated.connect()]);
     await alice.waitFor(() => alice.state(bob.id), 'shared player snapshot');
+    await isolated.waitFor(() => isolated.state(), 'isolated snapshot');
+    if (isolated.state(bob.id)) throw new Error('players leaked between Usion rooms');
 
-    const startX = alice.state().x;
-    await alice.stream(26, BUTTON.FORWARD);
-    await alice.stream(3, 0);
-    await alice.waitFor(() => alice.state().x > startX + 2.5, 'voxel movement');
-
-    for (let tick = 0; tick < 70 && ![...alice.edits.values()].includes(BLOCK.AIR); tick++) {
-      alice.send(BUTTON.MINE, -Math.PI / 2, -1.1);
-      await sleep(34);
-    }
-    alice.send(0, -Math.PI / 2, -1.1);
     await alice.waitFor(
-      () => [...alice.edits.values()].includes(BLOCK.AIR),
-      'authoritative mining',
+      () => alice.events.some((event) => event.t === 'match' && event.phase === 'live'),
+      'live round',
     );
-    const minedKey = [...alice.edits].find(([, id]) => id === BLOCK.AIR)[0];
-    await bob.waitFor(() => bob.edits.get(minedKey) === BLOCK.AIR, 'shared mining edit');
+    const start = alice.state();
+    await alice.stream(24, BUTTON.FORWARD, start.yaw);
+    await alice.waitFor(() => {
+      const state = alice.state();
+      return Math.hypot(state.x - start.x, state.z - start.z) > 0.25;
+    }, 'authoritative movement');
 
-    alice.send(BUTTON.PLACE, -Math.PI / 2, -1.1, 5);
-    await sleep(80);
-    alice.send(0, -Math.PI / 2, -1.1, 5);
-    await alice.waitFor(() => [...alice.edits.values()].includes(BLOCK.PLANKS), 'block placement');
-    const placedKey = [...alice.edits].find(([, id]) => id === BLOCK.PLANKS)[0];
-    assertSameBlock(placedKey, minedKey);
-    await bob.waitFor(() => bob.edits.get(placedKey) === BLOCK.PLANKS, 'shared placement edit');
+    const ammo = alice.state().ammo;
+    alice.fireAt(bob);
+    await alice.waitFor(
+      () => alice.events.some((event) => event.t === 'shot' && event.shooter === alice.id),
+      'authoritative shot event',
+    );
+    await alice.waitFor(() => alice.state().ammo === ammo - 1, 'authoritative ammo');
+    await eliminate(alice, bob);
+    await alice.waitFor(
+      () => bob.state()?.health === 0
+        && (bob.state().flags & PLAYER_FLAG.SPECTATOR),
+      'server-owned death and spectator state',
+    );
+    await alice.waitFor(
+      () => alice.events.some((event) => event.t === 'kill' && event.victim === bob.id),
+      'authoritative kill event',
+    );
+    await alice.waitFor(
+      () => bob.state()?.health === 100 && (bob.state().flags & PLAYER_FLAG.ALIVE),
+      'next-round respawn',
+    );
+    await eliminate(alice, bob);
+    await alice.waitFor(
+      () => alice.events.some((event) => event.t === 'match' && event.phase === 'match_end'),
+      'score-limit match end',
+    );
 
-    alice.close();
-    bob.close();
-    await sleep(800);
-    await stopServer(server);
-    server = null;
+    const originalId = alice.id;
+    await alice.close();
+    const rejoined = new Bot('Алтан', 'smoke-alice');
+    await rejoined.connect();
+    if (rejoined.id !== originalId) throw new Error('reconnect did not retain the match seat');
+    if (!rejoined.events.some((event) => event.t === 'welcome' && event.reconnected)) {
+      throw new Error('reconnect was not acknowledged');
+    }
 
-    server = await startServer(worldPath);
-    const late = new Bot('Саруул', 'smoke-late-000003');
-    await late.connect();
-    await late.waitFor(() => late.edits.get(placedKey) === BLOCK.PLANKS, 'restart persistence');
-    late.close();
-    console.log('  ok  two clients mine/place one shared block; restart preserves it');
+    rejoined.ws.send(Buffer.from([1, 2]));
+    await sleep(100);
+    if (rejoined.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('malformed input disconnected a healthy client');
+    }
+    await rejoined.close();
+
+    await flood.connect();
+    for (let index = 0; index < 100; index += 1) {
+      flood.send(0, 0);
+    }
+    await flood.waitFor(
+      () => flood.closeCode === 4008,
+      'rate-limit rejection',
+    );
+    console.log(
+      '  ok  room isolation, combat loop, reconnect, malformed input, and rate limit',
+    );
   } finally {
-    if (server) await stopServer(server);
-    await rm(directory, { recursive: true, force: true });
+    await Promise.all([alice.close(), bob.close(), isolated.close(), flood.close()]);
+    await stopServer(server);
   }
 }
 
@@ -175,7 +249,3 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-
-function assertSameBlock(actual, expected) {
-  if (actual !== expected) throw new Error(`placement moved from ${expected} to ${actual}`);
-}

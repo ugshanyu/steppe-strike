@@ -24,7 +24,10 @@ function securityHeaders(response) {
     + "frame-ancestors 'self' https://usions.com; object-src 'none'; base-uri 'none'");
 }
 
-export function createRequestHandler(world, distDirectory, store = null) {
+export function createRequestHandler(rooms, distDirectory, {
+  resultReporter = null,
+  ticker = null,
+} = {}) {
   return async (request, response) => {
     securityHeaders(response);
     const url = new URL(request.url, 'http://localhost');
@@ -34,12 +37,10 @@ export function createRequestHandler(world, distDirectory, store = null) {
       response.end(JSON.stringify({
         ok: true,
         game: 'steppe-strike',
-        players: world.connectedPlayers().length,
-        capacity: 96,
-        tick: world.tickNumber,
-        revision: world.revision,
-        edits: world.voxels.edits.size,
-        persistence: store?.health() || null,
+        ...rooms.health(),
+        tickRate: 60,
+        resultSigning: Boolean(resultReporter?.configured()),
+        simulation: ticker?.health() || null,
         region: process.env.RAILWAY_REPLICA_REGION || 'local',
         uptime: Math.round(process.uptime()),
       }));
