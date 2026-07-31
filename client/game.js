@@ -41,19 +41,38 @@ export class SteppeStrike {
     this.lastFrame = performance.now();
     this.lastFireNonce = 0;
     this.started = false;
+    this.entered = false;
     requestAnimationFrame((time) => this.frame(time));
   }
 
   start(name) {
     if (this.started) return;
     this.started = true;
-    this.ui.enterGame(this.input.touch);
-    this.input.capture();
     this.net.connect(name);
+  }
+
+  changeRoom() {
+    if (!this.started) return;
+    this.world = null;
+    this.view.setWorld(null);
+    this.localId = 0;
+    this.local = null;
+    this.names.clear();
+    this.pending = [];
+    this.remoteFrames = [];
+    this.sequence = 0;
+    this.serverTick = 0;
+    this.ui.updatePopulation(0, this.capacity);
+    this.net.refreshAccess();
   }
 
   onEvent(message) {
     if (message.t === 'welcome') {
+      if (!this.entered) {
+        this.entered = true;
+        this.ui.enterGame(this.input.touch);
+        this.input.capture();
+      }
       this.localId = message.id;
       this.capacity = message.maxPlayers;
       this.world = new CombatMap();

@@ -76,9 +76,13 @@ export class MatchRoom {
     seat.vy ??= 0;
     seat.vz ??= 0;
     seat.jumpHeld ??= false;
-    seat.lastAck ??= 0;
-    seat.lastWireSeq ??= null;
-    seat.lastFireNonce ??= null;
+    // Every browser connection starts its wire counters from zero. Preserve
+    // the authoritative seat/input sequence, but reset connection-local
+    // counters so a recovered player can move immediately.
+    seat.lastAck = 0;
+    seat.lastWireSeq = null;
+    seat.lastFireNonce = null;
+    seat.pendingShot = null;
     seat.lastFireAt ??= -Infinity;
     seat.damageDealt ??= 0;
     seat.history ??= new TransformHistory();

@@ -70,10 +70,13 @@ export class Match {
     if (!id) throw new TypeError('playerId is required');
     const existing = this.seats.get(id);
     if (existing) {
-      if (existing.expired || now > existing.disconnectExpiresAt) return null;
+      const graceExpired = existing.expired || now > existing.disconnectExpiresAt;
+      if (this.phase === PHASE.MATCH_END && graceExpired) return null;
+      existing.sessionId = String(sessionId || id);
       existing.connected = true;
       existing.disconnectedAt = null;
       existing.disconnectExpiresAt = Infinity;
+      existing.expired = false;
       this.armWarmup(now);
       return { seat: existing, reconnected: true };
     }

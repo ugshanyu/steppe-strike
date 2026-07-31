@@ -24,10 +24,12 @@ export class GameUI {
       connected: 'ХОЛБОГДСОН',
       reconnecting: 'ДАХИН ХОЛБОЖ БАЙНА',
       full: 'ТОГЛОЛТ ДҮҮРСЭН',
+      replaced: 'ӨӨР ТӨХӨӨРӨМЖ ДЭЭР НЭЭЛТТЭЙ',
     };
     this.connection.lastChild.textContent = ` ${labels[status] || status}`;
     this.connection.querySelector('i').style.background =
-      status === 'connected' ? '#75eb72' : status === 'full' ? '#ff6b4a' : '#ffc84a';
+      status === 'connected' ? '#75eb72'
+        : ['full', 'replaced'].includes(status) ? '#ff6b4a' : '#ffc84a';
   }
 
   setMatch(match = {}) {

@@ -46,19 +46,6 @@ async function initializeUsion(usion) {
   });
 }
 
-async function waitForRoom(usion, initialRoomId) {
-  if (initialRoomId) return String(initialRoomId);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('No Usion room assigned')), 12_000);
-    usion.game?.onRoomAssigned?.((info) => {
-      const roomId = info?.roomId || usion.config?.roomId;
-      if (!roomId) return;
-      clearTimeout(timer);
-      resolve(String(roomId));
-    });
-  });
-}
-
 function devPlatform() {
   const params = new URLSearchParams(location.search);
   const roomId = (params.get('room') || 'local-room')
@@ -74,6 +61,7 @@ function devPlatform() {
     embedded: false,
     name: '',
     roomId,
+    onRoomChanged: () => () => {},
     resolveUrl: async () => {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const base = `${protocol}//${location.host}/ws`;
@@ -92,11 +80,37 @@ export async function initializePlatform() {
     throw new Error('Usion direct-game SDK unavailable');
   }
   const config = await initializeUsion(usion);
-  const roomId = await waitForRoom(usion, usion.config?.roomId || config?.roomId);
+  let roomId = String(usion.config?.roomId || config?.roomId || '');
+  const roomListeners = new Set();
+  let resolveInitialRoom;
+  let initialRoomTimer;
+  const initialRoom = roomId ? Promise.resolve(roomId) : new Promise((resolve, reject) => {
+    resolveInitialRoom = resolve;
+    initialRoomTimer = setTimeout(
+      () => reject(new Error('No Usion room assigned')),
+      12_000,
+    );
+  });
+  usion.game.onRoomAssigned?.((info) => {
+    const assigned = String(info?.roomId || usion.config?.roomId || '');
+    if (!assigned || assigned === roomId) return;
+    const hadRoom = Boolean(roomId);
+    roomId = assigned;
+    if (!hadRoom) {
+      clearTimeout(initialRoomTimer);
+      resolveInitialRoom?.(roomId);
+    }
+    else for (const listener of roomListeners) listener(roomId);
+  });
+  await initialRoom;
   return {
     embedded: true,
-    roomId,
+    get roomId() { return roomId; },
     name: String(usion.user?.getName?.() || config?.userName || '').trim().slice(0, 18),
+    onRoomChanged(callback) {
+      roomListeners.add(callback);
+      return () => roomListeners.delete(callback);
+    },
     resolveUrl: async () => {
       const access = await usion.game._fetchDirectAccess({
         roomId,
