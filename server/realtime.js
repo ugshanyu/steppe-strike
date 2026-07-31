@@ -12,6 +12,8 @@ import { createUsionDirectTokenVerifier } from './usion-direct-auth.js';
 
 const HELLO_TIMEOUT_MS = 5_000;
 const MAX_BUFFERED_BYTES = 128 * 1_024;
+const RATE_WARN_MESSAGES = 90;
+const RATE_LIMIT_MESSAGES = 180;
 const ROOM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const log = (level, event, fields = {}) => {
   console.log(JSON.stringify({ level, event, ...fields }));
@@ -84,7 +86,9 @@ export function attachRealtime(server, rooms, {
     ws.isAlive = true;
     ws.seat = null;
     ws.room = null;
-    ws.messageWindow = { started: Date.now(), count: 0 };
+    ws.messageWindow = {
+      started: Date.now(), count: 0, binary: 0, text: 0,
+    };
     const timer = setTimeout(() => ws.close(4000, 'hello timeout'), HELLO_TIMEOUT_MS);
     const { roomId, token } = request.direct;
     const authenticate = () => {
@@ -97,9 +101,29 @@ export function attachRealtime(server, rooms, {
     ws.on('message', async (data, isBinary) => {
       const now = Date.now();
       if (now - ws.messageWindow.started >= 1_000) {
-        ws.messageWindow = { started: now, count: 0 };
+        ws.messageWindow = {
+          started: now, count: 0, binary: 0, text: 0,
+        };
       }
-      if (++ws.messageWindow.count > 90) return ws.close(4008, 'rate limit');
+      ws.messageWindow.count++;
+      ws.messageWindow[isBinary ? 'binary' : 'text']++;
+      if (ws.messageWindow.count === RATE_WARN_MESSAGES + 1) {
+        log('warn', 'realtime_rate_high', {
+          roomId,
+          networkId: ws.seat?.networkId || null,
+          binaryMessages: ws.messageWindow.binary,
+          textMessages: ws.messageWindow.text,
+        });
+      }
+      if (ws.messageWindow.count > RATE_LIMIT_MESSAGES) {
+        log('warn', 'realtime_rate_limited', {
+          roomId,
+          networkId: ws.seat?.networkId || null,
+          binaryMessages: ws.messageWindow.binary,
+          textMessages: ws.messageWindow.text,
+        });
+        return ws.close(4008, 'rate limit');
+      }
       if (!ws.seat) {
         if (isBinary || ws.joining) return;
         let message;
