@@ -3,6 +3,8 @@ import {
   decodeSnapshot, encodeInput, encodePing,
 } from '../shared/protocol.js';
 
+export const shouldReconnectAfterClose = (code) => ![4001, 4009].includes(code);
+
 export class RealtimeClient {
   constructor(resolveUrl, handlers = {}) {
     this.resolveUrl = resolveUrl;
@@ -51,10 +53,27 @@ export class RealtimeClient {
       clearTimeout(timeout);
       this.stopPings();
       if (socket !== this.socket || !this.started) return;
-      this.handlers.status?.(event.code === 4001 ? 'full' : 'reconnecting');
+      if (!shouldReconnectAfterClose(event.code)) {
+        this.handlers.status?.(event.code === 4001 ? 'full' : 'replaced');
+        return;
+      }
+      this.handlers.status?.('reconnecting');
       this.scheduleReconnect();
     });
     socket.addEventListener('error', () => {});
+  }
+
+  refreshAccess() {
+    if (!this.started) return;
+    this.generation++;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectAttempt = 0;
+    this.stopPings();
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close(1000, 'room changed');
+    this.open();
   }
 
   scheduleReconnect() {

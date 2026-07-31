@@ -61,11 +61,27 @@ test('room enforces ten seats and retains a reconnect seat', () => {
   }
   assert.equal(room.join(identity('overflow'), 'Overflow', socket(), 0), null);
   const seat = room.match.seats.get('p0');
+  seat.lastWireSeq = 200;
+  seat.lastAck = 200;
+  seat.lastFireNonce = 9;
+  seat.pendingShot = { nonce: 9, viewTick: 1 };
   room.disconnect(seat, 10);
   const ws = socket();
   const joined = room.join(identity('p0'), 'P0', ws, 11);
   assert.equal(joined.reconnected, true);
   assert.equal(joined.seat.ws, ws);
+  assert.equal(joined.seat.lastWireSeq, null);
+  assert.equal(joined.seat.lastAck, 0);
+  assert.equal(joined.seat.lastFireNonce, null);
+  assert.equal(joined.seat.pendingShot, null);
+  assert.equal(room.setInput(joined.seat, {
+    seq: 1,
+    buttons: BUTTON.FORWARD,
+    yaw: 0,
+    pitch: 0,
+    fireNonce: 0,
+    viewTick: room.tickNumber,
+  }, 12), true);
 });
 
 test('a duplicate connection replaces the old socket without duplicating the seat', () => {

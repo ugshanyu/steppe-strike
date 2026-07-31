@@ -13,6 +13,9 @@ import { createUsionDirectTokenVerifier } from './usion-direct-auth.js';
 const HELLO_TIMEOUT_MS = 5_000;
 const MAX_BUFFERED_BYTES = 128 * 1_024;
 const ROOM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const log = (level, event, fields = {}) => {
+  console.log(JSON.stringify({ level, event, ...fields }));
+};
 
 const sendJson = (ws, payload) => {
   if (ws.readyState === ws.OPEN && ws.bufferedAmount < MAX_BUFFERED_BYTES) {
@@ -62,6 +65,10 @@ export function attachRealtime(server, rooms, {
     const allowed = !ALLOWED_ORIGINS.size || ALLOWED_ORIGINS.has(origin)
       || (!IS_PRODUCTION && /^https?:\/\/localhost(?::\d+)?$/.test(origin));
     if (url.pathname !== '/ws' || !allowed) {
+      log('warn', 'realtime_upgrade_rejected', {
+        reason: url.pathname !== '/ws' ? 'invalid_path' : 'origin_not_allowed',
+        origin: origin.slice(0, 256),
+      });
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -104,6 +111,7 @@ export function attachRealtime(server, rooms, {
           if (!identity || ws.readyState !== ws.OPEN) throw new Error('invalid identity');
           const joined = rooms.join(identity, String(message.name || ''), ws, now);
           if (!joined) {
+            log('warn', 'match_join_rejected', { roomId, reason: 'match_unavailable' });
             sendJson(ws, { t: 'error', reason: 'MATCH_UNAVAILABLE' });
             ws.close(4001, 'match unavailable');
             return;
@@ -112,7 +120,17 @@ export function attachRealtime(server, rooms, {
           ws.seat = joined.seat;
           ws.room = joined.room;
           sendJson(ws, joined.room.welcome(joined.seat, joined.reconnected));
-        } catch {
+          log('info', 'match_joined', {
+            roomId,
+            networkId: joined.seat.networkId,
+            connectedPlayers: joined.room.match.connectedSeats().length,
+            reconnected: joined.reconnected,
+          });
+        } catch (error) {
+          log('warn', 'realtime_access_rejected', {
+            roomId: ROOM_ID.test(roomId) ? roomId : '',
+            reason: error?.message === 'invalid room' ? 'invalid_room' : 'invalid_access',
+          });
           sendJson(ws, { t: 'error', reason: 'USION_ACCESS_REJECTED' });
           ws.close(4002, 'invalid access');
         }
@@ -128,9 +146,18 @@ export function attachRealtime(server, rooms, {
         ws.send(encodePong(view.getFloat64(1, true)));
       }
     });
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       clearTimeout(timer);
-      if (ws.room && ws.seat?.ws === ws) ws.room.disconnect(ws.seat);
+      if (ws.room && ws.seat?.ws === ws) {
+        const { room, seat } = ws;
+        room.disconnect(seat);
+        log('info', 'match_disconnected', {
+          roomId: room.id,
+          networkId: seat.networkId,
+          code,
+          connectedPlayers: room.match.connectedSeats().length,
+        });
+      }
     });
     ws.on('error', () => {});
   });

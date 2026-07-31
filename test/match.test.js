@@ -131,17 +131,28 @@ test('ammo consumption and reload completion are authoritative', () => {
   assert.equal(seat.reserveAmmo, 87);
 });
 
-test('reconnect retains a seat within grace and expires it afterward', () => {
+test('reconnect retains its authenticated seat before and after grace', () => {
   const match = create({ reconnectGraceMs: 500 });
   const [seat] = join(match, ['alpha', 'bravo']);
-  assert.equal(match.disconnect(seat.playerId, 10), true);
-  const connected = match.join({ playerId: seat.playerId }, 509);
+  start(match);
+  assert.equal(match.disconnect(seat.playerId, 110), true);
+  const connected = match.join({ playerId: seat.playerId }, 609);
   assert.equal(connected.reconnected, true);
   assert.equal(connected.seat, seat);
-  match.disconnect(seat.playerId, 600);
-  match.step(1_101);
+  match.disconnect(seat.playerId, 700);
+  match.step(1_201);
   assert.equal(seat.expired, true);
-  assert.equal(match.join({ playerId: seat.playerId }, 1_102), null);
+  const recovered = match.join({
+    playerId: seat.playerId,
+    sessionId: 'fresh-session',
+  }, 1_202);
+  assert.equal(recovered.reconnected, true);
+  assert.equal(recovered.seat, seat);
+  assert.equal(seat.expired, false);
+  assert.equal(seat.connected, true);
+  assert.equal(seat.sessionId, 'fresh-session');
+  assert.equal(seat.spectator, true);
+  assert.equal(seat.alive, false);
 });
 
 test('input state validates sequence and clamps untrusted values', () => {

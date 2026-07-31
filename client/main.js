@@ -14,6 +14,7 @@ async function boot() {
     status.textContent = 'Usion өрөөтэй холбож байна…';
     const platform = await initializePlatform();
     const game = new SteppeStrike(canvas, { resolveUrl: platform.resolveUrl });
+    platform.onRoomChanged?.(() => game.changeRoom());
     if (platform.name) {
       nameInput.value = platform.name;
       nameInput.readOnly = true;
